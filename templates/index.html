@@ -1,0 +1,637 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>SmartRoad AI — Scan</title>
+<link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Barlow:wght@300;400;600;700&family=Barlow+Condensed:wght@700;800&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg:#0a0c0e;--surface:#111418;--card:#181d22;--border:#2a3038;
+    --accent:#f0c040;--danger:#e03030;--safe:#20c060;--text:#e8eaec;--muted:#6a7480;
+    --mono:'Space Mono',monospace;--sans:'Barlow',sans-serif;--cond:'Barlow Condensed',sans-serif;
+  }
+  *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent;}
+  html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--sans);overflow:hidden;}
+  body::before{content:'';position:fixed;inset:0;z-index:999;pointer-events:none;
+    background:repeating-linear-gradient(0deg,transparent,transparent 2px,rgba(0,0,0,0.08) 2px,rgba(0,0,0,0.08) 4px);}
+
+  .app{display:flex;flex-direction:column;height:100dvh;height:100vh;max-width:480px;margin:0 auto;}
+
+  /* Header */
+  header{display:flex;align-items:center;justify-content:space-between;
+    padding:10px 16px 8px;border-bottom:1px solid var(--border);
+    background:var(--surface);flex-shrink:0;}
+  .logo{font-family:var(--cond);font-size:20px;font-weight:800;letter-spacing:1px;color:var(--accent);}
+  .logo span{color:var(--text);}
+  .header-right{display:flex;align-items:center;gap:8px;}
+  .user-badge{font-family:var(--mono);font-size:9px;color:var(--muted);
+    background:var(--card);border:1px solid var(--border);border-radius:3px;padding:4px 8px;}
+  .user-badge span{color:var(--accent);}
+  .icon-btn{font-family:var(--mono);font-size:10px;color:var(--muted);
+    background:var(--card);border:1px solid var(--border);border-radius:4px;
+    padding:5px 10px;cursor:pointer;text-decoration:none;letter-spacing:0.5px;transition:all 0.2s;}
+  .icon-btn:hover{color:var(--accent);border-color:var(--accent);}
+
+  /* Status bar */
+  .statusbar{display:flex;border-bottom:1px solid var(--border);background:var(--surface);flex-shrink:0;}
+  .stat-item{flex:1;padding:6px 8px;text-align:center;border-right:1px solid var(--border);}
+  .stat-item:last-child{border-right:none;}
+  .stat-label{font-family:var(--mono);font-size:8px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;display:block;}
+  .stat-val{font-family:var(--mono);font-size:14px;font-weight:700;color:var(--accent);display:block;line-height:1.2;}
+
+  /* Viewfinder */
+  .viewfinder-wrap{position:relative;flex:1;overflow:hidden;background:#000;}
+  #camera,#canvas-overlay{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;}
+  #canvas-overlay{z-index:2;}
+  .corner{position:absolute;z-index:3;width:28px;height:28px;pointer-events:none;}
+  .corner--tl{top:12px;left:12px;border-top:2px solid var(--accent);border-left:2px solid var(--accent);}
+  .corner--tr{top:12px;right:12px;border-top:2px solid var(--accent);border-right:2px solid var(--accent);}
+  .corner--bl{bottom:12px;left:12px;border-bottom:2px solid var(--accent);border-left:2px solid var(--accent);}
+  .corner--br{bottom:12px;right:12px;border-bottom:2px solid var(--accent);border-right:2px solid var(--accent);}
+  .scanline-anim{position:absolute;left:12px;right:12px;height:1px;z-index:3;
+    background:linear-gradient(90deg,transparent,var(--accent),transparent);
+    opacity:0.6;pointer-events:none;display:none;
+    animation:scanmove 3s ease-in-out infinite;}
+  @keyframes scanmove{0%{top:12px;opacity:0}10%{opacity:.6}90%{opacity:.6}100%{top:calc(100% - 12px);opacity:0}}
+  .detect-flash{position:absolute;inset:0;z-index:4;pointer-events:none;border:3px solid var(--danger);opacity:0;transition:opacity 0.1s;}
+  .detect-flash.active{opacity:1;}
+  .detect-badge{position:absolute;top:12px;left:50%;transform:translateX(-50%);
+    z-index:5;pointer-events:none;font-family:var(--cond);font-size:13px;font-weight:800;
+    letter-spacing:2px;text-transform:uppercase;padding:4px 14px;border-radius:2px;opacity:0;transition:opacity 0.2s;}
+  .detect-badge.damage{background:var(--danger);color:#fff;opacity:1;}
+  .detect-badge.clear{background:rgba(32,192,96,0.15);color:var(--safe);border:1px solid var(--safe);opacity:1;}
+  .overlay-info{position:absolute;bottom:10px;left:12px;right:12px;z-index:5;pointer-events:none;}
+  .gps-tag{display:inline-block;font-family:var(--mono);font-size:9px;color:var(--accent);
+    background:rgba(0,0,0,0.7);padding:3px 7px;border:1px solid rgba(240,192,64,0.3);border-radius:2px;}
+
+  /* Frame counter dots */
+  .frame-dots{position:absolute;top:12px;right:14px;z-index:5;display:flex;gap:5px;align-items:center;}
+  .frame-dot{width:10px;height:10px;border-radius:50%;border:1.5px solid rgba(255,255,255,0.4);transition:all 0.2s;}
+  .frame-dot.filled{background:var(--accent);border-color:var(--accent);}
+  .frame-dot.full{background:var(--danger);border-color:var(--danger);}
+
+  /* Controls */
+  .controls{padding:12px 16px 16px;background:var(--surface);border-top:1px solid var(--border);flex-shrink:0;}
+  .btn-scan{width:100%;padding:16px;font-family:var(--cond);font-size:18px;font-weight:800;
+    letter-spacing:3px;text-transform:uppercase;background:var(--accent);color:#0a0c0e;
+    border:none;border-radius:4px;cursor:pointer;transition:all 0.15s;}
+  .btn-scan:active{transform:scale(0.98);}
+  .btn-scan.scanning{background:var(--card);color:var(--danger);border:2px solid var(--danger);
+    animation:pulse-border 1.5s ease-in-out infinite;}
+  .btn-scan:disabled{opacity:0.4;cursor:not-allowed;animation:none;}
+  @keyframes pulse-border{0%,100%{box-shadow:0 0 0 0 rgba(224,48,48,0.4)}50%{box-shadow:0 0 0 6px rgba(224,48,48,0)}}
+  .bottom-row{display:flex;gap:8px;margin-top:8px;}
+  .btn-small{flex:1;padding:9px;font-family:var(--mono);font-size:10px;font-weight:700;
+    letter-spacing:0.5px;text-transform:uppercase;background:var(--card);color:var(--muted);
+    border:1px solid var(--border);border-radius:4px;cursor:pointer;transition:all 0.15s;}
+  .btn-small:active,.btn-small.active{color:var(--accent);border-color:var(--accent);}
+
+  /* ── SUBMIT SCREEN ─────────────────────────────────────────────────────── */
+  .submit-screen{
+    display:none;position:absolute;inset:0;z-index:50;
+    background:var(--bg);flex-direction:column;overflow-y:auto;
+  }
+  .submit-screen.open{display:flex;}
+
+  .submit-header{
+    padding:14px 16px;border-bottom:1px solid var(--border);
+    background:var(--surface);flex-shrink:0;
+    display:flex;align-items:center;justify-content:space-between;
+  }
+  .submit-title{font-family:var(--cond);font-size:18px;font-weight:800;
+    letter-spacing:1px;color:var(--accent);}
+  .submit-sub{font-family:var(--mono);font-size:9px;color:var(--muted);
+    text-transform:uppercase;letter-spacing:1px;margin-top:2px;}
+
+  .submit-body{padding:16px;flex:1;}
+
+  /* Captured frames preview strip */
+  .frames-strip{display:flex;gap:8px;margin-bottom:16px;overflow-x:auto;padding-bottom:4px;}
+  .frame-thumb{flex-shrink:0;width:100px;border-radius:4px;overflow:hidden;
+    border:1px solid var(--border);position:relative;}
+  .frame-thumb img{width:100%;aspect-ratio:4/3;object-fit:cover;display:block;}
+  .frame-thumb-label{font-family:var(--mono);font-size:8px;color:var(--accent);
+    padding:3px 5px;background:rgba(0,0,0,0.7);text-align:center;}
+
+  /* Location info */
+  .info-block{background:var(--card);border:1px solid var(--border);border-radius:6px;
+    padding:12px 14px;margin-bottom:14px;}
+  .info-row{display:flex;justify-content:space-between;align-items:center;
+    padding:5px 0;border-bottom:1px solid var(--border);}
+  .info-row:last-child{border-bottom:none;}
+  .info-key{font-family:var(--mono);font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;}
+  .info-val{font-family:var(--mono);font-size:10px;color:var(--text);text-align:right;max-width:60%;}
+
+  /* Note input */
+  .note-label{font-family:var(--mono);font-size:9px;color:var(--muted);
+    text-transform:uppercase;letter-spacing:1.5px;margin-bottom:6px;display:block;}
+  .note-input{width:100%;padding:12px 14px;background:var(--surface);
+    border:1px solid var(--border);border-radius:4px;color:var(--text);
+    font-family:var(--sans);font-size:14px;resize:none;outline:none;
+    transition:border-color 0.2s;min-height:80px;}
+  .note-input:focus{border-color:var(--accent);}
+  .note-input::placeholder{color:var(--muted);}
+
+  /* Action buttons */
+  .submit-actions{display:flex;gap:10px;margin-top:16px;padding:0 0 16px;}
+  .btn-submit{flex:2;padding:16px;font-family:var(--cond);font-size:17px;font-weight:800;
+    letter-spacing:2px;text-transform:uppercase;background:var(--safe);color:#0a0c0e;
+    border:none;border-radius:4px;cursor:pointer;transition:all 0.15s;}
+  .btn-submit:active{transform:scale(0.98);}
+  .btn-discard{flex:1;padding:16px;font-family:var(--cond);font-size:14px;font-weight:800;
+    letter-spacing:1px;text-transform:uppercase;background:var(--card);color:var(--danger);
+    border:2px solid var(--danger);border-radius:4px;cursor:pointer;transition:all 0.15s;}
+  .btn-discard:active{transform:scale(0.98);}
+
+  /* Blocked overlay when user already has an unsubmitted event */
+  .blocked-banner{display:none;align-items:center;gap:10px;
+    padding:10px 14px;background:rgba(224,48,48,0.1);
+    border-bottom:2px solid var(--danger);flex-shrink:0;}
+  .blocked-banner.show{display:flex;}
+  .blocked-txt{font-family:var(--mono);font-size:10px;color:var(--danger);flex:1;}
+  .blocked-review{font-family:var(--mono);font-size:10px;font-weight:700;
+    color:var(--accent);background:none;border:1px solid var(--accent);
+    border-radius:3px;padding:4px 10px;cursor:pointer;}
+
+  /* Toast */
+  .toast{position:fixed;bottom:110px;left:50%;transform:translateX(-50%);z-index:200;
+    font-family:var(--mono);font-size:11px;background:var(--card);color:var(--safe);
+    border:1px solid var(--safe);border-radius:3px;padding:8px 16px;white-space:nowrap;
+    opacity:0;transition:opacity 0.3s;pointer-events:none;}
+  .toast.show{opacity:1;}
+  .toast.error{color:var(--danger);border-color:var(--danger);}
+
+  .gps-dot{width:6px;height:6px;border-radius:50%;background:var(--muted);
+    display:inline-block;margin-right:4px;vertical-align:middle;transition:background 0.3s;}
+  .gps-dot.active{background:var(--safe);animation:blink 2s infinite;}
+  @keyframes blink{0%,100%{opacity:1}50%{opacity:0.4}}
+</style>
+</head>
+<body>
+<div class="app" style="position:relative;">
+
+  <!-- Header -->
+  <header>
+    <div class="logo">SMART<span>ROAD</span> AI</div>
+    <div class="header-right">
+      <div class="user-badge">USER: <span id="h-username">—</span></div>
+      <a href="/dashboard" class="icon-btn">Dashboard</a>
+      <button class="icon-btn" onclick="doLogout()">Logout</button>
+    </div>
+  </header>
+
+  <!-- Blocked banner (shown when unsubmitted event exists) -->
+  <div class="blocked-banner" id="blocked-banner">
+    <div class="blocked-txt">You have an unsubmitted report. Submit or discard it first.</div>
+    <button class="blocked-review" onclick="openSubmitScreen()">Review</button>
+  </div>
+
+  <!-- Status bar -->
+  <div class="statusbar">
+    <div class="stat-item">
+      <span class="stat-label">Frames</span>
+      <span class="stat-val" id="s-frames">0/3</span>
+    </div>
+    <div class="stat-item">
+      <span class="stat-label"><span class="gps-dot" id="gps-dot"></span>GPS</span>
+      <span class="stat-val" id="s-gps" style="font-size:10px;color:var(--muted)">—</span>
+    </div>
+    <div class="stat-item">
+      <span class="stat-label">FPS</span>
+      <span class="stat-val" id="s-fps">—</span>
+    </div>
+    <div class="stat-item">
+      <span class="stat-label">Status</span>
+      <span class="stat-val" id="s-status" style="font-size:10px;color:var(--muted)">IDLE</span>
+    </div>
+  </div>
+
+  <!-- Viewfinder -->
+  <div class="viewfinder-wrap">
+    <video id="camera" autoplay playsinline muted></video>
+    <canvas id="canvas-overlay"></canvas>
+    <div class="corner corner--tl"></div>
+    <div class="corner corner--tr"></div>
+    <div class="corner corner--bl"></div>
+    <div class="corner corner--br"></div>
+    <div class="scanline-anim" id="scanline"></div>
+    <div class="detect-flash" id="detect-flash"></div>
+    <div class="detect-badge" id="detect-badge"></div>
+    <!-- Frame progress dots -->
+    <div class="frame-dots" id="frame-dots">
+      <div class="frame-dot" id="dot-1"></div>
+      <div class="frame-dot" id="dot-2"></div>
+      <div class="frame-dot" id="dot-3"></div>
+    </div>
+    <div class="overlay-info">
+      <div class="gps-tag" id="gps-tag">GPS: acquiring...</div>
+    </div>
+  </div>
+
+  <!-- Controls -->
+  <div class="controls">
+    <button class="btn-scan" id="btn-scan" onclick="toggleScan()">▶ START SCAN</button>
+    <div class="bottom-row">
+      <button class="btn-small" onclick="switchCamera()">⟳ FLIP CAM</button>
+      <button class="btn-small" id="btn-torch" onclick="toggleTorch()">⚡ TORCH</button>
+      <button class="btn-small" onclick="window.location='/dashboard'">📊 HISTORY</button>
+    </div>
+  </div>
+
+  <!-- ── SUBMIT SCREEN ──────────────────────────────────────────────────── -->
+  <div class="submit-screen" id="submit-screen">
+    <div class="submit-header">
+      <div>
+        <div class="submit-title">Review Report</div>
+        <div class="submit-sub">Add a note and confirm submission</div>
+      </div>
+    </div>
+
+    <div class="submit-body">
+
+      <!-- Captured frames -->
+      <label class="note-label">Captured frames</label>
+      <div class="frames-strip" id="frames-strip">
+        <div style="font-family:var(--mono);font-size:10px;color:var(--muted);padding:20px">Loading...</div>
+      </div>
+
+      <!-- Location info -->
+      <div class="info-block" id="info-block">
+        <div class="info-row">
+          <span class="info-key">Location</span>
+          <span class="info-val" id="sub-city">—</span>
+        </div>
+        <div class="info-row">
+          <span class="info-key">GPS</span>
+          <span class="info-val" id="sub-gps">—</span>
+        </div>
+        <div class="info-row">
+          <span class="info-key">Frames captured</span>
+          <span class="info-val" id="sub-frames">—</span>
+        </div>
+        <div class="info-row">
+          <span class="info-key">Event ID</span>
+          <span class="info-val" id="sub-evid">—</span>
+        </div>
+      </div>
+
+      <!-- Note -->
+      <label class="note-label">Note (optional)</label>
+      <textarea class="note-input" id="note-input"
+        placeholder="Describe the damage — e.g. deep pothole near signal, cracked road surface..."></textarea>
+
+      <!-- Actions -->
+      <div class="submit-actions">
+        <button class="btn-discard" onclick="discardEvent()">✕ Discard</button>
+        <button class="btn-submit" onclick="submitEvent()">✓ Submit Report</button>
+      </div>
+
+    </div>
+  </div>
+
+</div><!-- /app -->
+
+<div class="toast" id="toast"></div>
+
+<script>
+// ── State ─────────────────────────────────────────────────────────────────────
+let stream = null, scanning = false, frameTimer = null;
+let gps = { lat: null, lon: null, city: "Unknown" };
+let lastFpsTime = Date.now(), fpsFrames = 0;
+let facingMode = "environment", torchOn = false, track = null;
+let currentFrameCount = 0;
+let hasActiveEvent = false;
+
+const video  = document.getElementById("camera");
+const canvas = document.getElementById("canvas-overlay");
+const ctx    = canvas.getContext("2d");
+
+// ── Init ──────────────────────────────────────────────────────────────────────
+window.addEventListener("load", async () => {
+  const me = await fetch("/api/me").then(r=>r.json());
+  document.getElementById("h-username").textContent = (me.username||"—").toUpperCase();
+  await startCamera();
+  startGPS();
+  await checkActiveEvent();
+});
+window.addEventListener("resize", resizeCanvas);
+
+// ── Check if user already has active event ────────────────────────────────────
+async function checkActiveEvent() {
+  const res  = await fetch("/api/event/status");
+  const data = await res.json();
+  if (data.active) {
+    hasActiveEvent     = true;
+    currentFrameCount  = data.frame_count;
+    updateFrameDots(data.frame_count, data.max_reached);
+    updateFrameStatus(data.frame_count);
+    showBlockedBanner(true);
+    disableScanBtn(true);
+  }
+}
+
+// ── Camera ────────────────────────────────────────────────────────────────────
+async function startCamera() {
+  if (stream) stream.getTracks().forEach(t=>t.stop());
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({
+      video:{ facingMode, width:{ideal:1280}, height:{ideal:720} }, audio:false
+    });
+    video.srcObject = stream;
+    track = stream.getVideoTracks()[0];
+    await video.play();
+    resizeCanvas();
+  } catch(e) { showToast("Camera error: "+e.message, true); }
+}
+function resizeCanvas() {
+  canvas.width  = video.videoWidth  || canvas.offsetWidth;
+  canvas.height = video.videoHeight || canvas.offsetHeight;
+}
+async function switchCamera() {
+  facingMode = facingMode==="environment"?"user":"environment";
+  if (scanning){ stopScan(); await startCamera(); startScan(); }
+  else await startCamera();
+}
+async function toggleTorch() {
+  if (!track) return;
+  torchOn = !torchOn;
+  try {
+    await track.applyConstraints({ advanced:[{torch:torchOn}] });
+    document.getElementById("btn-torch").classList.toggle("active", torchOn);
+  } catch(e){ showToast("Torch not supported",true); torchOn=false; }
+}
+
+// ── GPS ───────────────────────────────────────────────────────────────────────
+function startGPS() {
+  if (!navigator.geolocation) return;
+  navigator.geolocation.watchPosition(pos=>{
+    gps.lat = pos.coords.latitude.toFixed(5);
+    gps.lon = pos.coords.longitude.toFixed(5);
+    document.getElementById("gps-tag").textContent = `GPS: ${gps.lat}, ${gps.lon}`;
+    document.getElementById("s-gps").textContent   = gps.lat;
+    document.getElementById("gps-dot").classList.add("active");
+    reverseGeocode(gps.lat, gps.lon);
+  }, ()=>{}, { enableHighAccuracy:true, maximumAge:3000 });
+}
+
+async function reverseGeocode(lat, lon) {
+  try {
+    const r = await fetch(
+      `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lon}&format=json&zoom=18&addressdetails=1`,
+      { headers: { 'Accept-Language': 'en' } }
+    );
+    const d = await r.json();
+    const a = d.address || {};
+
+    // Prefer urban/local admin labels (Airoli-like) over village fallback labels.
+    const locality =
+      a.suburb         ||
+      a.neighbourhood  ||
+      a.quarter        ||
+      a.city_district  ||
+      a.city           ||
+      a.town           ||
+      a.village        ||
+      a.hamlet         ||
+      a.county         ||
+      null;
+
+    const road = a.road || a.pedestrian || a.footway || null;
+
+    let label = locality || road || "Location acquired";
+
+    // Keep road context only when locality exists and is different.
+    if (road && locality && road !== locality) {
+      label = `${road}, ${locality}`;
+    }
+
+    gps.city = label;
+
+    // Update GPS tag to show location name too
+    document.getElementById("gps-tag").textContent =
+      `${label} (${lat}, ${lon})`;
+
+  } catch(e) {
+    // If nominatim fails, show coords as the location
+    gps.city = `${lat}, ${lon}`;
+  }
+}
+
+// ── Scan loop ─────────────────────────────────────────────────────────────────
+async function toggleScan() {
+  if (hasActiveEvent) { openSubmitScreen(); return; }
+  if (!stream) await startCamera();
+  scanning ? stopScan() : startScan();
+}
+
+function startScan() {
+  scanning = true;
+  document.getElementById("btn-scan").textContent = "■ STOP SCAN";
+  document.getElementById("btn-scan").classList.add("scanning");
+  document.getElementById("scanline").style.display = "block";
+  document.getElementById("s-status").textContent   = "SCANNING";
+  document.getElementById("s-status").style.color   = "var(--safe)";
+  sendFrame();
+}
+
+function stopScan() {
+  scanning = false;
+  clearTimeout(frameTimer);
+  document.getElementById("btn-scan").textContent = "▶ START SCAN";
+  document.getElementById("btn-scan").classList.remove("scanning");
+  document.getElementById("scanline").style.display = "none";
+  document.getElementById("s-status").textContent   = "IDLE";
+  document.getElementById("s-status").style.color   = "var(--muted)";
+  setDetectBadge(null);
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+}
+
+async function sendFrame() {
+  if (!scanning) return;
+  const t0 = Date.now();
+  resizeCanvas();
+  ctx.drawImage(video,0,0,canvas.width,canvas.height);
+  const b64 = canvas.toDataURL("image/jpeg",0.7);
+
+  try {
+    const res  = await fetch("/api/detect",{
+      method:"POST", headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({ image:b64, lat:gps.lat, lon:gps.lon, city:gps.city })
+    });
+    const data = await res.json();
+
+    if (data.annotated) {
+      const img  = new Image();
+      img.onload = ()=>ctx.drawImage(img,0,0,canvas.width,canvas.height);
+      img.src    = data.annotated;
+    }
+
+    const n = data.detections||0;
+    setDetectBadge(n);
+    if (n>0) flashDetect();
+
+    if (data.has_event) {
+      hasActiveEvent    = true;
+      currentFrameCount = data.frame_num;
+      updateFrameDots(data.frame_num, data.max_reached);
+      updateFrameStatus(data.frame_num);
+
+      if (data.max_reached) {
+        // Auto-stop and open submit screen
+        stopScan();
+        showToast("3 frames captured — review your report");
+        setTimeout(()=>openSubmitScreen(), 800);
+      }
+    }
+
+    // FPS
+    fpsFrames++;
+    const elapsed = (Date.now()-lastFpsTime)/1000;
+    if (elapsed>=1){
+      document.getElementById("s-fps").textContent = Math.round(fpsFrames/elapsed);
+      fpsFrames=0; lastFpsTime=Date.now();
+    }
+  } catch(e){ console.warn(e); }
+
+  const delay = Math.max(0, 300-(Date.now()-t0));
+  if (scanning) frameTimer = setTimeout(sendFrame, delay);
+}
+
+// ── UI helpers ────────────────────────────────────────────────────────────────
+function updateFrameDots(count, maxReached) {
+  for (let i=1;i<=3;i++){
+    const dot = document.getElementById(`dot-${i}`);
+    dot.className = "frame-dot" + (i<=count ? (maxReached?" full":" filled") : "");
+  }
+}
+
+function updateFrameStatus(count) {
+  document.getElementById("s-frames").textContent = `${count}/3`;
+  if (count>=3){
+    document.getElementById("s-status").textContent = "READY";
+    document.getElementById("s-status").style.color = "var(--accent)";
+  }
+}
+
+function disableScanBtn(disabled) {
+  const btn = document.getElementById("btn-scan");
+  btn.disabled = disabled;
+  if (disabled){
+    btn.textContent = "EVENT PENDING";
+    btn.classList.remove("scanning");
+  } else {
+    btn.textContent = "▶ START SCAN";
+  }
+}
+
+function showBlockedBanner(show) {
+  document.getElementById("blocked-banner").classList.toggle("show", show);
+}
+
+function setDetectBadge(n) {
+  const b = document.getElementById("detect-badge");
+  if (n===null){ b.className="detect-badge"; b.textContent=""; return; }
+  if (n>0){ b.className="detect-badge damage"; b.textContent=`DAMAGE (${n})`; }
+  else    { b.className="detect-badge clear";  b.textContent="CLEAR"; }
+}
+
+function flashDetect() {
+  const f = document.getElementById("detect-flash");
+  f.classList.add("active"); setTimeout(()=>f.classList.remove("active"),200);
+}
+
+let toastTimer;
+function showToast(msg, isError=false) {
+  const t = document.getElementById("toast");
+  t.textContent=msg; t.className="toast show"+(isError?" error":"");
+  clearTimeout(toastTimer); toastTimer=setTimeout(()=>t.classList.remove("show"),3500);
+}
+
+// ── Submit screen ─────────────────────────────────────────────────────────────
+async function openSubmitScreen() {
+  // Fetch latest event status
+  const res  = await fetch("/api/event/status");
+  const data = await res.json();
+  if (!data.active){ showToast("No active event",true); return; }
+
+  // Populate frames
+  const strip = document.getElementById("frames-strip");
+  if (data.stage_frames && data.stage_frames.length>0) {
+    strip.innerHTML = data.stage_frames.map((f,i)=>`
+      <div class="frame-thumb">
+        <img src="/staging/${f}" alt="frame ${i+1}" onerror="this.src='/static/placeholder.jpg'">
+        <div class="frame-thumb-label">FRAME ${i+1}</div>
+      </div>
+    `).join('');
+  } else {
+    strip.innerHTML = `<div style="font-family:var(--mono);font-size:10px;color:var(--muted);padding:20px">Images captured on server</div>`;
+  }
+
+  // Populate info
+  document.getElementById("sub-city").textContent   = data.city || "Unknown";
+  document.getElementById("sub-gps").textContent    = `${gps.lat||"N/A"}, ${gps.lon||"N/A"}`;
+  document.getElementById("sub-frames").textContent = `${data.frame_count} / 3`;
+  document.getElementById("sub-evid").textContent   = `#${data.event_id}`;
+  document.getElementById("note-input").value       = "";
+
+  document.getElementById("submit-screen").classList.add("open");
+}
+
+function closeSubmitScreen() {
+  document.getElementById("submit-screen").classList.remove("open");
+}
+
+async function submitEvent() {
+  const note = document.getElementById("note-input").value.trim();
+  const btn  = document.querySelector(".btn-submit");
+  btn.disabled=true; btn.textContent="Submitting...";
+
+  try {
+    const res = await fetch("/api/event/submit",{
+      method:"POST", headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({ note })
+    });
+    const data = await res.json();
+    if (res.ok){
+      closeSubmitScreen();
+      hasActiveEvent    = false;
+      currentFrameCount = 0;
+      updateFrameDots(0, false);
+      document.getElementById("s-frames").textContent = "0/3";
+      document.getElementById("s-status").textContent = "IDLE";
+      document.getElementById("s-status").style.color = "var(--muted)";
+      showBlockedBanner(false);
+      disableScanBtn(false);
+      showToast(`Report #${data.event_id} submitted successfully`);
+    } else {
+      showToast(data.error||"Submit failed",true);
+    }
+  } catch(e){ showToast("Server error",true); }
+  btn.disabled=false; btn.textContent="✓ Submit Report";
+}
+
+async function discardEvent() {
+  if (!confirm("Discard this report? All captured images will be deleted.")) return;
+  const res = await fetch("/api/event/discard",{ method:"POST" });
+  if (res.ok){
+    closeSubmitScreen();
+    hasActiveEvent    = false;
+    currentFrameCount = 0;
+    updateFrameDots(0,false);
+    document.getElementById("s-frames").textContent = "0/3";
+    document.getElementById("s-status").textContent = "IDLE";
+    document.getElementById("s-status").style.color = "var(--muted)";
+    showBlockedBanner(false);
+    disableScanBtn(false);
+    showToast("Report discarded");
+  }
+}
+
+async function doLogout() {
+  await fetch("/api/logout",{method:"POST"});
+  window.location.href="/login";
+}
+</script>
+</body>
+</html>

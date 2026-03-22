@@ -1,0 +1,654 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SmartRoad AI — Dashboard</title>
+<link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Barlow:wght@300;400;600;700&family=Barlow+Condensed:wght@700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+<style>
+  :root {
+    --bg:#0a0c0e;--surface:#111418;--card:#181d22;--border:#2a3038;
+    --accent:#f0c040;--danger:#e03030;--safe:#20c060;--text:#e8eaec;--muted:#6a7480;
+    --mono:'Space Mono',monospace;--sans:'Barlow',sans-serif;--cond:'Barlow Condensed',sans-serif;
+    --sev-low:#20c060;--sev-med:#f0a020;--sev-high:#e03030;--sev-crit:#cc00cc;
+  }
+  *{box-sizing:border-box;margin:0;padding:0;}
+  body{background:var(--bg);color:var(--text);font-family:var(--sans);min-height:100vh;}
+  body::before{content:'';position:fixed;inset:0;z-index:0;pointer-events:none;
+    background:repeating-linear-gradient(0deg,transparent,transparent 2px,rgba(0,0,0,0.06) 2px,rgba(0,0,0,0.06) 4px);}
+
+  header{display:flex;align-items:center;justify-content:space-between;
+    padding:12px 20px;border-bottom:1px solid var(--border);
+    background:var(--surface);position:sticky;top:0;z-index:100;}
+  .logo{font-family:var(--cond);font-size:20px;font-weight:800;color:var(--accent);}
+  .logo span{color:var(--text);}
+  .header-right{display:flex;align-items:center;gap:10px;flex-wrap:wrap;}
+  .role-badge{font-family:var(--mono);font-size:9px;font-weight:700;
+    padding:4px 10px;border-radius:3px;letter-spacing:1px;text-transform:uppercase;}
+  .role-badge.admin{background:rgba(240,192,64,0.15);color:var(--accent);border:1px solid rgba(240,192,64,0.4);}
+  .role-badge.user{background:rgba(32,192,96,0.1);color:var(--safe);border:1px solid rgba(32,192,96,0.3);}
+  .hbtn{font-family:var(--mono);font-size:10px;font-weight:700;
+    padding:6px 12px;border-radius:3px;cursor:pointer;border:1px solid var(--border);
+    background:var(--card);color:var(--muted);text-decoration:none;letter-spacing:0.5px;transition:all 0.15s;}
+  .hbtn:hover{color:var(--accent);border-color:var(--accent);}
+  .hbtn.primary{background:var(--accent);color:#0a0c0e;border-color:var(--accent);}
+  .hbtn.primary:hover{background:#d4a830;}
+
+  .main{max-width:1200px;margin:0 auto;padding:20px 16px;position:relative;z-index:1;}
+
+  /* Admin toolbar */
+  .admin-toolbar{display:none;align-items:center;gap:10px;flex-wrap:wrap;
+    padding:10px 14px;margin-bottom:16px;
+    background:rgba(240,192,64,0.05);border:1px solid rgba(240,192,64,0.2);
+    border-radius:6px;border-left:3px solid var(--accent);}
+  .admin-toolbar.visible{display:flex;}
+  .toolbar-label{font-family:var(--mono);font-size:9px;color:var(--accent);
+    text-transform:uppercase;letter-spacing:1px;margin-right:4px;}
+  .tbtn{font-family:var(--mono);font-size:10px;font-weight:700;
+    padding:6px 14px;border-radius:3px;cursor:pointer;letter-spacing:0.5px;transition:all 0.15s;}
+  .tbtn-export{background:rgba(32,192,96,0.1);color:var(--safe);border:1px solid rgba(32,192,96,0.3);}
+  .tbtn-export:hover{background:rgba(32,192,96,0.2);}
+
+  /* Stats */
+  .stats-grid{display:grid;grid-template-columns:repeat(5,1fr);gap:10px;margin-bottom:20px;}
+  @media(max-width:800px){.stats-grid{grid-template-columns:repeat(3,1fr);}}
+  @media(max-width:500px){.stats-grid{grid-template-columns:repeat(2,1fr);}}
+  .stat-card{background:var(--card);border:1px solid var(--border);border-radius:6px;padding:14px 16px;}
+  .stat-card-label{font-family:var(--mono);font-size:9px;color:var(--muted);
+    text-transform:uppercase;letter-spacing:1.5px;margin-bottom:6px;}
+  .stat-card-val{font-family:var(--cond);font-size:28px;font-weight:800;color:var(--accent);line-height:1;}
+  .stat-card-sub{font-size:11px;color:var(--muted);margin-top:3px;}
+
+  /* Severity legend */
+  .sev-legend{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px;align-items:center;}
+  .sev-legend-label{font-family:var(--mono);font-size:9px;color:var(--muted);
+    text-transform:uppercase;letter-spacing:1px;margin-right:4px;}
+  .sev-pill{display:flex;align-items:center;gap:5px;
+    font-family:var(--mono);font-size:9px;padding:4px 10px;border-radius:3px;font-weight:700;}
+  .sev-pill.low   {background:rgba(32,192,96,0.12);  color:var(--sev-low);  border:1px solid rgba(32,192,96,0.3);}
+  .sev-pill.med   {background:rgba(240,160,32,0.12); color:var(--sev-med);  border:1px solid rgba(240,160,32,0.3);}
+  .sev-pill.high  {background:rgba(224,48,48,0.12);  color:var(--sev-high); border:1px solid rgba(224,48,48,0.3);}
+  .sev-pill.crit  {background:rgba(204,0,204,0.12);  color:var(--sev-crit); border:1px solid rgba(204,0,204,0.3);}
+  .sev-dot{width:8px;height:8px;border-radius:50%;}
+  .sev-dot.low {background:var(--sev-low);}
+  .sev-dot.med {background:var(--sev-med);}
+  .sev-dot.high{background:var(--sev-high);}
+  .sev-dot.crit{background:var(--sev-crit);}
+
+  /* Two-col */
+  .two-col{display:grid;grid-template-columns:1.4fr 1fr;gap:14px;margin-bottom:20px;}
+  @media(max-width:700px){.two-col{grid-template-columns:1fr;}}
+
+  /* Map */
+  .map-card{background:var(--card);border:1px solid var(--border);border-radius:6px;overflow:hidden;}
+  .card-header{display:flex;align-items:center;justify-content:space-between;
+    padding:10px 14px;border-bottom:1px solid var(--border);flex-wrap:wrap;gap:6px;}
+  .card-title{font-family:var(--mono);font-size:11px;font-weight:700;
+    color:var(--muted);text-transform:uppercase;letter-spacing:1px;}
+  .card-badge{font-family:var(--mono);font-size:9px;
+    background:rgba(240,192,64,0.15);color:var(--accent);
+    border:1px solid rgba(240,192,64,0.3);padding:2px 7px;border-radius:2px;}
+  #map{height:340px;filter:brightness(0.85) contrast(1.1) hue-rotate(185deg);}
+
+  /* Cluster hotspot list */
+  .hotspot-card{background:var(--card);border:1px solid var(--border);
+    border-radius:6px;overflow:hidden;max-height:400px;display:flex;flex-direction:column;}
+  .hotspot-list{overflow-y:auto;flex:1;}
+  .hotspot-item{padding:12px 14px;border-bottom:1px solid var(--border);
+    cursor:pointer;transition:background 0.15s;}
+  .hotspot-item:hover{background:rgba(240,192,64,0.04);}
+  .hotspot-item:last-child{border-bottom:none;}
+  .hotspot-top{display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;}
+  .hotspot-name{font-size:13px;font-weight:600;color:var(--text);}
+  .hotspot-sev{font-family:var(--cond);font-size:12px;font-weight:800;
+    padding:2px 10px;border-radius:3px;letter-spacing:1px;}
+  .hotspot-sev.low {background:rgba(32,192,96,0.15);  color:var(--sev-low);}
+  .hotspot-sev.med {background:rgba(240,160,32,0.15); color:var(--sev-med);}
+  .hotspot-sev.high{background:rgba(224,48,48,0.15);  color:var(--sev-high);}
+  .hotspot-sev.crit{background:rgba(204,0,204,0.15);  color:var(--sev-crit);}
+  .hotspot-meta{display:flex;gap:12px;flex-wrap:wrap;}
+  .hotspot-stat{font-family:var(--mono);font-size:9px;color:var(--muted);}
+  .hotspot-stat span{color:var(--text);}
+  .hotspot-bar{height:3px;border-radius:2px;margin-top:8px;transition:width 0.3s;}
+  .hotspot-bar.low {background:var(--sev-low);}
+  .hotspot-bar.med {background:var(--sev-med);}
+  .hotspot-bar.high{background:var(--sev-high);}
+  .hotspot-bar.crit{background:var(--sev-crit);}
+
+  /* Log */
+  .log-section{margin-bottom:20px;}
+  .log-card{background:var(--card);border:1px solid var(--border);
+    border-radius:6px;overflow:hidden;max-height:300px;display:flex;flex-direction:column;}
+  .log-list{overflow-y:auto;flex:1;}
+  .log-item{display:grid;grid-template-columns:auto auto 1fr auto auto;
+    align-items:center;gap:10px;padding:10px 14px;
+    border-bottom:1px solid var(--border);transition:background 0.15s;}
+  .log-item:hover{background:rgba(240,192,64,0.04);}
+  .log-item:last-child{border-bottom:none;}
+  .log-num{font-family:var(--mono);font-size:10px;color:var(--muted);min-width:28px;}
+  .log-sev-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0;}
+  .log-loc{font-size:13px;font-weight:600;color:var(--text);}
+  .log-time{font-family:var(--mono);font-size:9px;color:var(--muted);margin-top:2px;}
+  .log-user{font-family:var(--mono);font-size:9px;color:var(--accent);
+    background:rgba(240,192,64,0.1);padding:2px 6px;border-radius:2px;display:inline-block;margin-top:2px;}
+  .log-count{font-family:var(--cond);font-size:18px;font-weight:800;color:var(--danger);}
+  .del-btn{font-family:var(--mono);font-size:9px;color:var(--muted);
+    background:none;border:1px solid var(--border);border-radius:3px;
+    padding:3px 8px;cursor:pointer;transition:all 0.15s;display:none;}
+  .del-btn:hover{color:var(--danger);border-color:var(--danger);}
+  .del-btn.visible{display:inline-block;}
+
+  /* Images */
+  .images-section{margin-bottom:20px;}
+  .section-title{font-family:var(--mono);font-size:11px;font-weight:700;
+    color:var(--muted);text-transform:uppercase;letter-spacing:1px;
+    margin-bottom:12px;display:flex;align-items:center;gap:10px;}
+  .section-title::after{content:'';flex:1;height:1px;background:var(--border);}
+  .images-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:8px;}
+  .img-card{background:var(--card);border:1px solid var(--border);
+    border-radius:4px;overflow:hidden;cursor:pointer;transition:border-color 0.2s;position:relative;}
+  .img-card:hover{border-color:var(--accent);}
+  .img-sev-strip{height:3px;width:100%;}
+  .img-sev-strip.low {background:var(--sev-low);}
+  .img-sev-strip.med {background:var(--sev-med);}
+  .img-sev-strip.high{background:var(--sev-high);}
+  .img-sev-strip.crit{background:var(--sev-crit);}
+  .img-card img{width:100%;aspect-ratio:4/3;object-fit:cover;display:block;}
+  .img-card-info{padding:6px 8px;}
+  .img-card-event{font-family:var(--mono);font-size:8px;color:var(--accent);text-transform:uppercase;}
+  .img-card-gps{font-size:9px;color:var(--muted);margin-top:2px;}
+  .img-card-user{font-family:var(--mono);font-size:8px;color:var(--safe);margin-top:2px;}
+
+  .empty{padding:40px 20px;text-align:center;color:var(--muted);font-family:var(--mono);font-size:12px;}
+
+  /* Lightbox */
+  .lightbox{position:fixed;inset:0;z-index:200;background:rgba(0,0,0,0.92);
+    display:none;align-items:center;justify-content:center;
+    flex-direction:column;gap:16px;padding:20px;}
+  .lightbox.open{display:flex;}
+  .lightbox img{max-width:100%;max-height:70vh;border-radius:4px;}
+  .lightbox-meta{font-family:var(--mono);font-size:11px;color:var(--muted);text-align:center;line-height:1.7;}
+  .lightbox-close{position:absolute;top:16px;right:20px;font-family:var(--mono);
+    font-size:20px;color:var(--text);cursor:pointer;background:none;border:none;}
+
+  .refresh-dot{width:5px;height:5px;border-radius:50%;background:var(--safe);
+    animation:blink 2s infinite;display:inline-block;margin-right:4px;}
+  @keyframes blink{0%,100%{opacity:1}50%{opacity:.2}}
+
+  /* Leaflet popup dark */
+  .leaflet-popup-content-wrapper{background:#181d22!important;border:1px solid #2a3038!important;color:#e8eaec!important;border-radius:6px!important;}
+  .leaflet-popup-tip{background:#181d22!important;}
+  .leaflet-popup-content{margin:10px 14px!important;font-family:'Barlow',sans-serif;font-size:12px;line-height:1.6;}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">SMART<span>ROAD</span> AI</div>
+  <div class="header-right">
+    <span class="refresh-dot"></span>
+    <div class="role-badge" id="role-badge">—</div>
+    <span style="font-family:var(--mono);font-size:10px;color:var(--muted)" id="h-username">—</span>
+    <a href="/scan" class="hbtn primary">▶ Scan</a>
+    <button class="hbtn" onclick="doLogout()">Logout</button>
+  </div>
+</header>
+
+<div class="main">
+
+  <!-- Admin toolbar -->
+  <div class="admin-toolbar" id="admin-toolbar">
+    <span class="toolbar-label">Admin tools</span>
+    <button class="tbtn tbtn-export" onclick="exportCSV()">Export CSV</button>
+  </div>
+
+  <!-- Stats -->
+  <div class="stats-grid">
+    <div class="stat-card">
+      <div class="stat-card-label">Events</div>
+      <div class="stat-card-val" id="d-events">0</div>
+      <div class="stat-card-sub" id="d-events-sub">damage events</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-card-label">Images saved</div>
+      <div class="stat-card-val" id="d-saved">0</div>
+      <div class="stat-card-sub">max 3 per event</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-card-label">Hotspots</div>
+      <div class="stat-card-val" id="d-hotspots">0</div>
+      <div class="stat-card-sub">clustered zones</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-card-label">Critical zones</div>
+      <div class="stat-card-val" style="color:var(--sev-crit)" id="d-critical">0</div>
+      <div class="stat-card-sub">need urgent fix</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-card-label">Model</div>
+      <div class="stat-card-val" style="font-size:12px;line-height:1.8" id="d-model">—</div>
+      <div class="stat-card-sub">YOLO</div>
+    </div>
+  </div>
+
+  <!-- Severity legend -->
+  <div class="sev-legend">
+    <span class="sev-legend-label">Severity scale:</span>
+    <div class="sev-pill low"><div class="sev-dot low"></div>LOW (1–2 reports)</div>
+    <div class="sev-pill med"><div class="sev-dot med"></div>MEDIUM (3–5 reports)</div>
+    <div class="sev-pill high"><div class="sev-dot high"></div>HIGH (6–9 reports)</div>
+    <div class="sev-pill crit"><div class="sev-dot crit"></div>CRITICAL (10+ reports)</div>
+  </div>
+
+  <!-- Map + Hotspots -->
+  <div class="two-col">
+    <div class="map-card">
+      <div class="card-header">
+        <div class="card-title">Damage heatmap</div>
+        <div style="display:flex;gap:6px;align-items:center;">
+          <div class="card-badge" id="map-count">0 clusters</div>
+          <div class="card-badge" style="background:rgba(204,0,204,0.1);color:var(--sev-crit);border-color:rgba(204,0,204,0.3)" id="map-crit">0 critical</div>
+        </div>
+      </div>
+      <div id="map"></div>
+    </div>
+
+    <div class="hotspot-card">
+      <div class="card-header">
+        <div class="card-title">Hotspot ranking</div>
+        <div class="card-badge" id="hotspot-count">0 zones</div>
+      </div>
+      <div class="hotspot-list" id="hotspot-list">
+        <div class="empty">No hotspots yet.</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Detection log -->
+  <div class="log-section">
+    <div class="log-card">
+      <div class="card-header">
+        <div class="card-title">Detection log</div>
+        <div class="card-badge" id="log-count">0 entries</div>
+      </div>
+      <div class="log-list" id="log-list">
+        <div class="empty">No detections yet.</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Images -->
+  <div class="images-section">
+    <div class="section-title">Captured evidence</div>
+    <div class="images-grid" id="images-grid">
+      <div class="empty" style="grid-column:1/-1">No images saved yet.</div>
+    </div>
+  </div>
+</div>
+
+<!-- Lightbox -->
+<div class="lightbox" id="lightbox" onclick="closeLightbox()">
+  <button class="lightbox-close">✕</button>
+  <img id="lb-img" src="" alt="">
+  <div class="lightbox-meta" id="lb-meta"></div>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+let currentRole = "user";
+
+// ── Map setup ─────────────────────────────────────────────────────────────────
+const map = L.map('map', { zoomControl: false }).setView([20.5937, 78.9629], 4);
+L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+  attribution: '© OpenStreetMap © CARTO', maxZoom: 19
+}).addTo(map);
+L.control.zoom({ position: 'bottomright' }).addTo(map);
+
+let mapLayers = [], allData = [], eventData = [];
+
+// ── Severity helpers ──────────────────────────────────────────────────────────
+// CLUSTER_RADIUS_KM: detections within this distance are same hotspot
+const CLUSTER_RADIUS_KM = 0.1; // 100 metres
+
+function getSeverity(reportCount) {
+  if (reportCount >= 10) return { level: 'crit',  label: 'CRITICAL', color: '#cc00cc', ring: 'rgba(204,0,204,0.25)',   size: 36 };
+  if (reportCount >= 6)  return { level: 'high',  label: 'HIGH',     color: '#e03030', ring: 'rgba(224,48,48,0.2)',    size: 28 };
+  if (reportCount >= 3)  return { level: 'med',   label: 'MEDIUM',   color: '#f0a020', ring: 'rgba(240,160,32,0.2)',   size: 22 };
+  return                        { level: 'low',   label: 'LOW',      color: '#20c060', ring: 'rgba(32,192,96,0.15)',   size: 16 };
+}
+
+function haversineKm(lat1, lon1, lat2, lon2) {
+  const R = 6371;
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLon = (lon2 - lon1) * Math.PI / 180;
+  const a = Math.sin(dLat/2)**2 + Math.cos(lat1*Math.PI/180)*Math.cos(lat2*Math.PI/180)*Math.sin(dLon/2)**2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+}
+
+function aggregateByEvent(data) {
+  const grouped = new Map();
+
+  data.forEach(d => {
+    const key = `${d.event}`;
+    if (!grouped.has(key)) {
+      grouped.set(key, {
+        id: d.id,
+        event: d.event,
+        timestamp: d.timestamp,
+        lat: d.lat,
+        lon: d.lon,
+        city: d.city,
+        username: d.username,
+        boxes: 0,
+        image: d.image,
+        frame_count: 0,
+        member_ids: [],
+      });
+    }
+
+    const g = grouped.get(key);
+    g.frame_count += 1;
+    g.boxes += Number(d.boxes || 0);
+    g.member_ids.push(d.id);
+
+    // Keep newest timestamp/id as representative row
+    if ((d.timestamp || '') > (g.timestamp || '')) {
+      g.timestamp = d.timestamp;
+      g.id = d.id;
+      g.image = d.image;
+    }
+  });
+
+  return Array.from(grouped.values()).sort((a, b) => {
+    if ((b.timestamp || '') !== (a.timestamp || '')) return (b.timestamp || '').localeCompare(a.timestamp || '');
+    return (b.event || 0) - (a.event || 0);
+  });
+}
+
+// ── Cluster detections into hotspots ─────────────────────────────────────────
+function clusterDetections(data) {
+  const pts = data.filter(d => d.lat && d.lat !== 'N/A' && d.lon && d.lon !== 'N/A');
+  const clusters = [];
+
+  pts.forEach(d => {
+    const lat = parseFloat(d.lat), lon = parseFloat(d.lon);
+    if (isNaN(lat) || isNaN(lon)) return;
+
+    // Find nearest existing cluster within radius
+    let nearest = null, nearestDist = Infinity;
+    clusters.forEach((c, i) => {
+      const dist = haversineKm(lat, lon, c.centLat, c.centLon);
+      if (dist < CLUSTER_RADIUS_KM && dist < nearestDist) {
+        nearest = i; nearestDist = dist;
+      }
+    });
+
+    if (nearest !== null) {
+      const c = clusters[nearest];
+      c.reports.push(d);
+      // Recalculate centroid
+      c.centLat = c.reports.reduce((s,r)=>s+parseFloat(r.lat),0) / c.reports.length;
+      c.centLon = c.reports.reduce((s,r)=>s+parseFloat(r.lon),0) / c.reports.length;
+      c.totalBoxes += d.boxes;
+      if (!c.users.includes(d.username)) c.users.push(d.username);
+      if (d.timestamp > c.lastSeen) c.lastSeen = d.timestamp;
+    } else {
+      clusters.push({
+        id:         clusters.length,
+        centLat:    lat,
+        centLon:    lon,
+        reports:    [d],
+        totalBoxes: d.boxes,
+        city:       d.city || 'Unknown',
+        users:      [d.username].filter(Boolean),
+        lastSeen:   d.timestamp,
+      });
+    }
+  });
+
+  // Sort by report count descending
+  return clusters.sort((a,b) => b.reports.length - a.reports.length);
+}
+
+// ── Main refresh ──────────────────────────────────────────────────────────────
+async function refresh() {
+  try {
+    const [logRes, statsRes, meRes] = await Promise.all([
+      fetch('/api/log'), fetch('/api/stats'), fetch('/api/me')
+    ]);
+    allData        = await logRes.json();
+    eventData      = aggregateByEvent(allData);
+    const stats    = await statsRes.json();
+    const me       = await meRes.json();
+    currentRole    = stats.role;
+
+    document.getElementById("h-username").textContent = (me.username||"").toUpperCase();
+    const rb = document.getElementById("role-badge");
+    rb.textContent = stats.role === "admin" ? "ADMIN" : "USER";
+    rb.className   = "role-badge " + stats.role;
+    if (stats.role === "admin") document.getElementById("admin-toolbar").classList.add("visible");
+
+    const clusters = clusterDetections(eventData);
+    const critCount = clusters.filter(c => getSeverity(c.reports.length).level === 'crit').length;
+
+    renderStats(stats, clusters, critCount);
+    renderMap(clusters);
+    renderHotspots(clusters);
+    renderLog(eventData);
+    renderImages(allData, clusters);
+  } catch(e) { console.warn(e); }
+}
+
+function renderStats(stats, clusters, critCount) {
+  document.getElementById('d-events').textContent   = stats.total_events || 0;
+  document.getElementById('d-saved').textContent    = stats.total_detections || 0;
+  document.getElementById('d-hotspots').textContent = clusters.length;
+  document.getElementById('d-critical').textContent = critCount;
+  document.getElementById('d-model').textContent    = (stats.model||'').replace('.pt','');
+  if (stats.role !== "admin") document.getElementById('d-events-sub').textContent = "your events";
+}
+
+// ── Map rendering with severity markers ───────────────────────────────────────
+function renderMap(clusters) {
+  mapLayers.forEach(l => map.removeLayer(l));
+  mapLayers = [];
+
+  document.getElementById('map-count').textContent = clusters.length + ' clusters';
+  document.getElementById('map-crit').textContent  = clusters.filter(c=>getSeverity(c.reports.length).level==='crit').length + ' critical';
+
+  clusters.forEach(c => {
+    const sev   = getSeverity(c.reports.length);
+    const count = c.reports.length;
+
+    // Outer pulse ring
+    const ring = L.circleMarker([c.centLat, c.centLon], {
+      radius:      sev.size * 0.9,
+      fillColor:   sev.ring,
+      fillOpacity: 1,
+      color:       sev.color,
+      weight:      1,
+      opacity:     0.4,
+    }).addTo(map);
+
+    // Inner filled marker with count
+    const icon = L.divIcon({
+      className: '',
+      html: `<div style="
+        width:${sev.size}px;height:${sev.size}px;border-radius:50%;
+        background:${sev.color};border:2px solid #fff;
+        display:flex;align-items:center;justify-content:center;
+        font-family:'Space Mono',monospace;font-size:${sev.size>22?11:9}px;
+        font-weight:700;color:#fff;
+        box-shadow:0 0 ${sev.size/2}px ${sev.color}88;
+        cursor:pointer;
+      ">${count}</div>`,
+      iconSize:   [sev.size, sev.size],
+      iconAnchor: [sev.size/2, sev.size/2],
+    });
+
+    const userList = currentRole === 'admin' ? `<br>By: ${c.users.join(', ')}` : '';
+    const marker = L.marker([c.centLat, c.centLon], { icon })
+      .bindPopup(`
+        <div style="font-weight:700;color:${sev.color};font-size:13px;margin-bottom:4px">
+          ${sev.label} SEVERITY
+        </div>
+        <div><b>${c.city}</b></div>
+        <div>${count} report${count>1?'s':''} · ${c.totalBoxes} detections</div>
+        <div style="color:#6a7480;font-size:10px">Last: ${formatTime(c.lastSeen)}</div>
+        ${userList}
+      `)
+      .addTo(map);
+
+    mapLayers.push(ring, marker);
+  });
+
+  if (clusters.length > 0) {
+    const top = clusters[0];
+    map.setView([top.centLat, top.centLon], 14);
+  }
+}
+
+// ── Hotspot list ──────────────────────────────────────────────────────────────
+function renderHotspots(clusters) {
+  const el = document.getElementById('hotspot-list');
+  document.getElementById('hotspot-count').textContent = clusters.length + ' zones';
+
+  if (!clusters.length) {
+    el.innerHTML = '<div class="empty">No hotspots detected yet.</div>'; return;
+  }
+
+  const maxReports = clusters[0].reports.length || 1;
+
+  el.innerHTML = clusters.map((c, i) => {
+    const sev   = getSeverity(c.reports.length);
+    const pct   = Math.round((c.reports.length / maxReports) * 100);
+    const userInfo = currentRole === 'admin'
+      ? `<div class="hotspot-stat">Reporters: <span>${c.users.join(', ')}</span></div>` : '';
+    return `
+      <div class="hotspot-item" onclick="focusOnMap(${c.centLat},${c.centLon})">
+        <div class="hotspot-top">
+          <div style="display:flex;align-items:center;gap:8px;">
+            <div class="sev-dot ${sev.level}"></div>
+            <div class="hotspot-name">#${i+1} · ${c.city}</div>
+          </div>
+          <div class="hotspot-sev ${sev.level}">${sev.label}</div>
+        </div>
+        <div class="hotspot-meta">
+          <div class="hotspot-stat">Reports: <span>${c.reports.length}</span></div>
+          <div class="hotspot-stat">Detections: <span>${c.totalBoxes}</span></div>
+          <div class="hotspot-stat">Last seen: <span>${formatTime(c.lastSeen)}</span></div>
+          ${userInfo}
+        </div>
+        <div class="hotspot-bar ${sev.level}" style="width:${pct}%"></div>
+      </div>
+    `;
+  }).join('');
+}
+
+// ── Log ───────────────────────────────────────────────────────────────────────
+function renderLog(data) {
+  const el = document.getElementById('log-list');
+  document.getElementById('log-count').textContent = data.length + ' reports';
+  if (!data.length) { el.innerHTML = '<div class="empty">No reports yet.</div>'; return; }
+
+  el.innerHTML = data.map(d => {
+    const sev = getSeverity(d.boxes);
+    return `
+      <div class="log-item" id="logrow-${d.id}">
+        <div class="log-num">#${d.id}</div>
+        <div class="log-sev-dot" style="background:${sev.color}"></div>
+        <div style="cursor:pointer" onclick="focusOnMap(${d.lat||0},${d.lon||0})">
+          <div class="log-loc">${d.city||'Unknown'}</div>
+          <div class="log-time">${formatTime(d.timestamp)} · Ev.${d.event} · ${d.frame_count||1} image${(d.frame_count||1)>1?'s':''}</div>
+          ${currentRole==='admin'?`<div class="log-user">${d.username||''}</div>`:''}
+        </div>
+        <div class="log-count" style="color:${sev.color}">${d.boxes}</div>
+        <button class="del-btn ${currentRole==='admin'?'visible':''}" onclick="deleteEntry(${JSON.stringify(d.member_ids||[]).replace(/"/g, '&quot;')})">DEL</button>
+      </div>
+    `;
+  }).join('');
+}
+
+// ── Images ────────────────────────────────────────────────────────────────────
+function renderImages(data, clusters) {
+  const grid = document.getElementById('images-grid');
+  if (!data.length) { grid.innerHTML = '<div class="empty" style="grid-column:1/-1">No images saved yet.</div>'; return; }
+
+  // Find severity of the cluster this image belongs to
+  function getImageSev(d) {
+    if (!d.lat || d.lat === 'N/A') return getSeverity(1);
+    const lat = parseFloat(d.lat), lon = parseFloat(d.lon);
+    let best = null, bestDist = Infinity;
+    clusters.forEach(c => {
+      const dist = haversineKm(lat, lon, c.centLat, c.centLon);
+      if (dist < bestDist) { bestDist = dist; best = c; }
+    });
+    return best ? getSeverity(best.reports.length) : getSeverity(1);
+  }
+
+  grid.innerHTML = data.map(d => {
+    const sev = getImageSev(d);
+    return `
+      <div class="img-card" onclick="openLightbox('${d.image}','${d.city}','${d.lat}','${d.lon}','${formatTime(d.timestamp)}','${d.username||''}','${sev.label}','${sev.color}')">
+        <div class="img-sev-strip ${sev.level}"></div>
+        <img src="/outputs/${d.image}" alt="damage" loading="lazy" onerror="this.style.display='none'">
+        <div class="img-card-info">
+          <div class="img-card-event">Ev.${d.event} · ${sev.label}</div>
+          <div class="img-card-gps">${d.lat!=='N/A'?d.lat+', '+d.lon:'No GPS'}</div>
+          ${currentRole==='admin'?`<div class="img-card-user">${d.username||''}</div>`:''}
+        </div>
+      </div>
+    `;
+  }).join('');
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+function focusOnMap(lat, lon) {
+  if (lat && lon) map.setView([lat, lon], 16);
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+async function deleteEntry(ids) {
+  const idList = Array.isArray(ids) ? ids : [ids];
+  if (!idList.length) return;
+  if (!confirm("Delete this report and all its images?")) return;
+
+  let ok = true;
+  for (const id of idList) {
+    const res = await fetch(`/api/delete/${id}`, { method: "DELETE" });
+    if (!res.ok) {
+      ok = false;
+      break;
+    }
+  }
+  if (ok) refresh(); else alert("Delete failed");
+}
+
+function exportCSV() { window.location.href = "/api/export"; }
+
+function openLightbox(img, city, lat, lon, time, user, sevLabel, sevColor) {
+  document.getElementById('lb-img').src = '/outputs/' + img;
+  document.getElementById('lb-meta').innerHTML =
+    `<span style="color:${sevColor||'#f0c040'};font-weight:700">${sevLabel||''} SEVERITY</span><br>
+     ${city}<br>${lat}, ${lon}<br>${time}
+     ${currentRole==='admin'&&user?`<br>Reported by: ${user}`:''}`;
+  document.getElementById('lightbox').classList.add('open');
+}
+function closeLightbox() { document.getElementById('lightbox').classList.remove('open'); }
+
+function formatTime(iso) {
+  if (!iso) return '—';
+  const d = new Date(iso); return d.toLocaleDateString() + ' ' + d.toLocaleTimeString();
+}
+
+async function doLogout() {
+  await fetch("/api/logout", { method: "POST" });
+  window.location.href = "/login";
+}
+
+refresh();
+setInterval(refresh, 3000);
+</script>
+</body>
+</html>
