@@ -414,16 +414,15 @@ function clusterDetections(data) {
 // ── Main refresh ──────────────────────────────────────────────────────────────
 async function refresh() {
   try {
-    const [logRes, statsRes, meRes] = await Promise.all([
-      fetch('/api/log'), fetch('/api/stats'), fetch('/api/me')
+    const [logRes, statsRes] = await Promise.all([
+      fetch('/api/log'), fetch('/api/stats')
     ]);
     allData        = await logRes.json();
     eventData      = aggregateByEvent(allData);
     const stats    = await statsRes.json();
-    const me       = await meRes.json();
     currentRole    = stats.role;
 
-    document.getElementById("h-username").textContent = (me.username||"").toUpperCase();
+    document.getElementById("h-username").textContent = (stats.username||"").toUpperCase();
     const rb = document.getElementById("role-badge");
     rb.textContent = stats.role === "admin" ? "ADMIN" : "USER";
     rb.className   = "role-badge " + stats.role;
@@ -648,7 +647,7 @@ async function doLogout() {
 }
 
 refresh();
-setInterval(refresh, 3000);
+setInterval(refresh, 5000);
 </script>
 </body>
 </html>

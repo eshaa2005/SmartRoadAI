@@ -9,6 +9,8 @@ import io
 import shutil
 import threading
 import json
+import logging
+import socket
 from datetime import datetime
 from functools import wraps
 
@@ -18,11 +20,21 @@ app.secret_key = "smartroad_secret_2024"
 # ── Config ────────────────────────────────────────────────────────────────────
 MODEL_PATH    = "yolo12s_RDD2022_best.pt"
 OUTPUT_DIR    = "outputs"
-STAGING_DIR   = "staging"          # temp folder while event is in progress
-MAX_PER_EVENT = 3                  # max 3 images per event
+STAGING_DIR   = "staging"
+LOG_FILE      = os.path.join(OUTPUT_DIR, "detections_log.json")
+MAX_PER_EVENT = 3
 CONF_THRESH   = 0.25
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 os.makedirs(STAGING_DIR, exist_ok=True)
+
+# ── Damage class labels ───────────────────────────────────────────────────────
+CLASS_LABELS = {
+    "D00":    "Longitudinal Crack",
+    "D10":    "Transverse Crack",
+    "D20":    "Alligator Crack",
+    "D40":    "Pothole",
+    "Repair": "Repaired Area",
+}
 
 # ── Credentials ───────────────────────────────────────────────────────────────
 ADMIN_USERNAME = "admin"
@@ -32,9 +44,8 @@ USERS = {
     "user2": "pass456",
 }
 
-# ── Model ─────────────────────────────────────────────────────────────────────
+# ── Geocode ───────────────────────────────────────────────────────────────────
 def geocode_location(lat, lon):
-    """Convert lat/lon to a readable location name using Nominatim."""
     try:
         import urllib.request
         url = (f"https://nominatim.openstreetmap.org/reverse"
@@ -54,17 +65,75 @@ def geocode_location(lat, lon):
         return f"{lat}, {lon}"
 
 
+# ── Model ─────────────────────────────────────────────────────────────────────
 print("Loading YOLO model...")
 model = YOLO(MODEL_PATH)
 print("Model loaded!")
 
 # ── Global state ──────────────────────────────────────────────────────────────
-detections_log  = []          # submitted reports only
-event_counter   = 0           # global event ID counter
-lock            = threading.Lock()
+detections_log = []
+event_counter  = 0
+lock           = threading.Lock()
+active_events  = {}
 
-# Per-user active event: { username: { event_id, frames[], lat, lon, city, started } }
-active_events   = {}
+
+def next_event_id_locked():
+    global event_counter
+    in_use_active = {int(ev.get("event_id", 0) or 0) for ev in active_events.values()}
+    candidate = max(int(event_counter or 0), max(in_use_active, default=0)) + 1
+    while True:
+        out_dir = os.path.join(OUTPUT_DIR, f"event_{candidate:03d}")
+        if candidate not in in_use_active and not os.path.exists(out_dir):
+            event_counter = candidate
+            return candidate
+        candidate += 1
+
+
+def save_log_to_disk():
+    try:
+        tmp_file = LOG_FILE + ".tmp"
+        # Convert sets to lists before serialising
+        serialisable = []
+        for d in detections_log:
+            row = dict(d)
+            if isinstance(row.get("damage_types"), set):
+                row["damage_types"] = list(row["damage_types"])
+            serialisable.append(row)
+        with open(tmp_file, "w", encoding="utf-8") as f:
+            json.dump(serialisable, f, ensure_ascii=False, indent=2)
+        os.replace(tmp_file, LOG_FILE)
+    except Exception as e:
+        print(f"Warning: could not save log file: {e}")
+
+
+def load_log_from_disk():
+    global detections_log, event_counter
+    if not os.path.exists(LOG_FILE):
+        return
+    try:
+        with open(LOG_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        if not isinstance(data, list):
+            print("Warning: log file format invalid; expected list")
+            return
+        detections_log = [d for d in data if isinstance(d, dict)]
+        max_event = 0
+        for d in detections_log:
+            try:
+                max_event = max(max_event, int(d.get("event", 0) or 0))
+            except Exception:
+                pass
+        max_dir_event = 0
+        try:
+            for name in os.listdir(OUTPUT_DIR):
+                if name.startswith("event_") and name[6:].isdigit():
+                    max_dir_event = max(max_dir_event, int(name[6:]))
+        except Exception:
+            pass
+        event_counter = max(max_event, max_dir_event)
+        print(f"Loaded {len(detections_log)} report entries from {LOG_FILE}")
+    except Exception as e:
+        print(f"Warning: could not load log file: {e}")
 
 
 # ── Auth ──────────────────────────────────────────────────────────────────────
@@ -147,12 +216,6 @@ def me():
 @app.route("/api/detect", methods=["POST"])
 @login_required
 def detect():
-    """
-    Receives a frame. Runs YOLO.
-    If damage found and user has no active event → starts one.
-    Saves frames to STAGING (not OUTPUT) until user submits.
-    Returns: detections count, annotated frame, event status.
-    """
     global event_counter
 
     data = request.json or {}
@@ -170,7 +233,6 @@ def detect():
     city     = data.get("city", "")
     username = session["username"]
 
-    # If client didn't resolve a name, try server-side geocode
     if (not city or city.strip().lower() in ("", "unknown")) and lat != "N/A":
         city = geocode_location(lat, lon)
 
@@ -179,30 +241,46 @@ def detect():
     annotated = results[0].plot()
     now       = datetime.now()
 
-    frame_num  = 0
+    # ── Extract damage class names ────────────────────────────────────────────
+    damage_classes = []
+    class_counts   = {}
+    if num_boxes > 0:
+        for box in results[0].boxes:
+            cls_id   = int(box.cls[0])
+            cls_name = model.names.get(cls_id, f"class_{cls_id}")
+            damage_classes.append(cls_name)
+            class_counts[cls_name] = class_counts.get(cls_name, 0) + 1
+
+    damage_summary = ", ".join(
+        f"{CLASS_LABELS.get(k, k)} x{v}" for k, v in class_counts.items()
+    ) if class_counts else ""
+
+    frame_num   = 0
     max_reached = False
 
     with lock:
         ev = active_events.get(username)
 
         if num_boxes > 0:
-            # Start a new event if user has none
             if ev is None:
-                event_counter += 1
-                stage_dir = os.path.join(STAGING_DIR, f"{username}_ev{event_counter}")
+                new_event_id = next_event_id_locked()
+                stage_dir    = os.path.join(STAGING_DIR, f"{username}_ev{new_event_id}")
                 os.makedirs(stage_dir, exist_ok=True)
                 ev = {
-                    "event_id":  event_counter,
-                    "stage_dir": stage_dir,
-                    "frames":    [],
-                    "lat":       lat,
-                    "lon":       lon,
-                    "city":      city,
-                    "started":   now.isoformat(),
+                    "event_id":     new_event_id,
+                    "stage_dir":    stage_dir,
+                    "frames":       [],
+                    "lat":          lat,
+                    "lon":          lon,
+                    "city":         city,
+                    "started":      now.isoformat(),
+                    "damage_types": set(),
                 }
                 active_events[username] = ev
 
-            # Save frame to staging (max 3)
+            # Accumulate all damage types seen across all frames
+            ev["damage_types"].update(damage_classes)
+
             if len(ev["frames"]) < MAX_PER_EVENT:
                 ts    = now.strftime("%Y%m%d_%H%M%S_%f")[:-3]
                 fname = f"frame_{len(ev['frames'])+1:02d}_{ts}.jpg"
@@ -212,6 +290,7 @@ def detect():
                 lines = [
                     f"Event #{ev['event_id']}  Frame {len(ev['frames'])+1}/{MAX_PER_EVENT}",
                     f"User     : {username}",
+                    f"Damage   : {damage_summary}",
                     f"Location : {city}",
                     f"GPS      : {lat}, {lon}",
                     f"Time     : {now.strftime('%Y-%m-%d %H:%M:%S')}",
@@ -222,12 +301,17 @@ def detect():
                 cv2.imwrite(fpath, save_frame)
 
                 rel = os.path.join(f"{username}_ev{ev['event_id']}", fname).replace("\\", "/")
-                ev["frames"].append({"file": fname, "rel": rel, "boxes": num_boxes})
+                ev["frames"].append({
+                    "file":           fname,
+                    "rel":            rel,
+                    "boxes":          num_boxes,
+                    "damage_summary": damage_summary,
+                    "class_counts":   class_counts,
+                })
                 frame_num = len(ev["frames"])
 
             max_reached = len(ev["frames"]) >= MAX_PER_EVENT
 
-    # Build staging preview paths
     stage_frames = []
     with lock:
         ev2 = active_events.get(username)
@@ -238,12 +322,14 @@ def detect():
     annotated_b64 = "data:image/jpeg;base64," + base64.b64encode(buf).decode()
 
     return jsonify({
-        "detections":   num_boxes,
-        "annotated":    annotated_b64,
-        "has_event":    active_events.get(username) is not None,
-        "frame_num":    frame_num,
-        "max_reached":  max_reached,
-        "stage_frames": stage_frames,
+        "detections":     num_boxes,
+        "annotated":      annotated_b64,
+        "has_event":      active_events.get(username) is not None,
+        "frame_num":      frame_num,
+        "max_reached":    max_reached,
+        "stage_frames":   stage_frames,
+        "damage_summary": damage_summary,
+        "class_counts":   class_counts,
     })
 
 
@@ -256,11 +342,11 @@ def event_status():
     if not ev:
         return jsonify({"active": False})
     return jsonify({
-        "active":      True,
-        "event_id":    ev["event_id"],
-        "frame_count": len(ev["frames"]),
-        "max_reached": len(ev["frames"]) >= MAX_PER_EVENT,
-        "city":        ev["city"],
+        "active":       True,
+        "event_id":     ev["event_id"],
+        "frame_count":  len(ev["frames"]),
+        "max_reached":  len(ev["frames"]) >= MAX_PER_EVENT,
+        "city":         ev["city"],
         "stage_frames": [f["rel"] for f in ev["frames"]],
     })
 
@@ -268,10 +354,6 @@ def event_status():
 @app.route("/api/event/submit", methods=["POST"])
 @login_required
 def submit_event():
-    """
-    User confirms the report. Moves frames from staging → outputs.
-    Adds note to each log entry.
-    """
     username = session["username"]
     note     = (request.json or {}).get("note", "").strip()
 
@@ -280,12 +362,17 @@ def submit_event():
         if not ev or not ev["frames"]:
             return jsonify({"error": "No active event to submit"}), 400
 
-        # Move staging folder → outputs
-        event_id  = ev["event_id"]
-        out_dir   = os.path.join(OUTPUT_DIR, f"event_{event_id:03d}")
+        event_id = ev["event_id"]
+        out_dir  = os.path.join(OUTPUT_DIR, f"event_{event_id:03d}")
         os.makedirs(out_dir, exist_ok=True)
 
-        for f in ev["frames"]:
+        next_id = max((int(d.get("id", 0) or 0) for d in detections_log), default=0) + 1
+
+        # Build readable damage type list for this whole event
+        damage_types  = sorted(ev.get("damage_types", set()))
+        damage_labels = [CLASS_LABELS.get(d, d) for d in damage_types]
+
+        for idx, f in enumerate(ev["frames"], start=1):
             src = os.path.join(ev["stage_dir"], f["file"])
             dst = os.path.join(out_dir, f["file"])
             if os.path.exists(src):
@@ -293,20 +380,25 @@ def submit_event():
 
             rel_out = os.path.join(f"event_{event_id:03d}", f["file"]).replace("\\", "/")
             detections_log.append({
-                "id":        len(detections_log) + 1,
-                "event":     event_id,
-                "frame":     len(detections_log) + 1,
-                "timestamp": ev["started"],
-                "lat":       ev["lat"],
-                "lon":       ev["lon"],
-                "city":      ev["city"],
-                "boxes":     f["boxes"],
-                "image":     rel_out,
-                "username":  username,
-                "note":      note,
+                "id":             next_id,
+                "event":          event_id,
+                "frame":          idx,
+                "timestamp":      ev["started"],
+                "lat":            ev["lat"],
+                "lon":            ev["lon"],
+                "city":           ev["city"],
+                "boxes":          f["boxes"],
+                "image":          rel_out,
+                "username":       username,
+                "note":           note,
+                "damage_summary": f.get("damage_summary", ""),
+                "damage_types":   damage_labels,
+                "class_counts":   f.get("class_counts", {}),
             })
+            next_id += 1
 
-        # Clean up staging dir
+        save_log_to_disk()
+
         try:
             shutil.rmtree(ev["stage_dir"])
         except Exception:
@@ -320,7 +412,6 @@ def submit_event():
 @app.route("/api/event/discard", methods=["POST"])
 @login_required
 def discard_event():
-    """User discards — delete staging files, reset."""
     username = session["username"]
     with lock:
         ev = active_events.get(username)
@@ -373,6 +464,7 @@ def delete_detection(detection_id):
         if os.path.exists(img_path):
             os.remove(img_path)
         detections_log.remove(entry)
+        save_log_to_disk()
     return jsonify({"ok": True})
 
 @app.route("/api/export")
@@ -382,22 +474,44 @@ def export_csv():
     with lock:
         data = list(detections_log)
     output = io.StringIO()
-    fields = ["id","event","frame","timestamp","username","city","lat","lon","boxes","note","image"]
+    fields = ["id","event","frame","timestamp","username","city","lat","lon",
+              "boxes","damage_summary","damage_types","note","image"]
     writer = csv.DictWriter(output, fieldnames=fields)
     writer.writeheader()
     for row in data:
-        writer.writerow({k: row.get(k, "") for k in fields})
+        r = {k: row.get(k, "") for k in fields}
+        # Flatten list fields for CSV
+        if isinstance(r["damage_types"], list):
+            r["damage_types"] = " | ".join(r["damage_types"])
+        writer.writerow(r)
     response = Response(output.getvalue(), mimetype="text/csv")
     response.headers["Content-Disposition"] = "attachment; filename=smartroad_report.csv"
     return response
 
 
 if __name__ == "__main__":
+    logging.getLogger("werkzeug").setLevel(logging.WARNING)
+
+    def get_lan_ip():
+        try:
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            s.connect(("8.8.8.8", 80))
+            ip = s.getsockname()[0]
+            s.close()
+            return ip
+        except Exception:
+            return "127.0.0.1"
+
+    with lock:
+        load_log_from_disk()
+
+    port   = int(os.environ.get("PORT", 5000))
+    lan_ip = get_lan_ip()
     print("\n" + "="*50)
     print("  SmartRoad AI — Server starting")
     print(f"  Admin : {ADMIN_USERNAME} / {ADMIN_PASSWORD}")
     print(f"  Users : user1/pass123  user2/pass456")
-    print("  Open  : http://<YOUR_PC_IP>:5000")
+    print(f"  Local : http://127.0.0.1:{port}")
+    print(f"  LAN   : http://{lan_ip}:{port}")
     print("="*50 + "\n")
-    port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port, debug=False, threaded=True)

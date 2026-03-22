@@ -1,0 +1,118 @@
+[
+  {
+    "id": 1,
+    "event": 1,
+    "frame": 1,
+    "timestamp": "2026-03-22T19:49:33.065083",
+    "lat": "19.15107",
+    "lon": "72.99233",
+    "city": "Airoli",
+    "boxes": 1,
+    "image": "event_001/frame_01_20260322_194933_065.jpg",
+    "username": "user1",
+    "note": ""
+  },
+  {
+    "id": 2,
+    "event": 1,
+    "frame": 2,
+    "timestamp": "2026-03-22T19:49:33.065083",
+    "lat": "19.15107",
+    "lon": "72.99233",
+    "city": "Airoli",
+    "boxes": 1,
+    "image": "event_001/frame_02_20260322_194933_939.jpg",
+    "username": "user1",
+    "note": ""
+  },
+  {
+    "id": 3,
+    "event": 1,
+    "frame": 3,
+    "timestamp": "2026-03-22T19:49:33.065083",
+    "lat": "19.15107",
+    "lon": "72.99233",
+    "city": "Airoli",
+    "boxes": 1,
+    "image": "event_001/frame_03_20260322_194934_505.jpg",
+    "username": "user1",
+    "note": ""
+  },
+  {
+    "id": 4,
+    "event": 3,
+    "frame": 1,
+    "timestamp": "2026-03-22T19:55:04.638671",
+    "lat": "19.15111",
+    "lon": "72.99235",
+    "city": "Airoli",
+    "boxes": 1,
+    "image": "event_003/frame_01_20260322_195504_638.jpg",
+    "username": "user2",
+    "note": ""
+  },
+  {
+    "id": 5,
+    "event": 4,
+    "frame": 1,
+    "timestamp": "2026-03-23T00:21:08.865933",
+    "lat": "19.15098",
+    "lon": "72.99273",
+    "city": "Mugalsan Road, Airoli",
+    "boxes": 1,
+    "image": "event_004/frame_01_20260323_002108_865.jpg",
+    "username": "user2",
+    "note": "",
+    "damage_summary": "Alligator Crack x1",
+    "damage_types": [
+      "Alligator Crack",
+      "Pothole"
+    ],
+    "class_counts": {
+      "D20": 1
+    }
+  },
+  {
+    "id": 6,
+    "event": 4,
+    "frame": 2,
+    "timestamp": "2026-03-23T00:21:08.865933",
+    "lat": "19.15098",
+    "lon": "72.99273",
+    "city": "Mugalsan Road, Airoli",
+    "boxes": 1,
+    "image": "event_004/frame_02_20260323_002111_524.jpg",
+    "username": "user2",
+    "note": "",
+    "damage_summary": "Alligator Crack x1",
+    "damage_types": [
+      "Alligator Crack",
+      "Pothole"
+    ],
+    "class_counts": {
+      "D20": 1
+    }
+  },
+  {
+    "id": 7,
+    "event": 4,
+    "frame": 3,
+    "timestamp": "2026-03-23T00:21:08.865933",
+    "lat": "19.15098",
+    "lon": "72.99273",
+    "city": "Mugalsan Road, Airoli",
+    "boxes": 2,
+    "image": "event_004/frame_03_20260323_002112_362.jpg",
+    "username": "user2",
+    "note": "",
+    "damage_summary": "Alligator Crack x1, Pothole x1",
+    "damage_types": [
+      "Alligator Crack",
+      "Pothole"
+    ],
+    "class_counts": {
+      "D20": 1,
+      "D40": 1
+    }
+  }
+]

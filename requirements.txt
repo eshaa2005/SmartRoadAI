@@ -2,7 +2,7 @@ flask>=3.0.0
 numpy>=1.24.0
 requests>=2.31.0
 opencv-python-headless>=4.8.0
+git+https://github.com/sunsmarterjie/yolov12.git
 --extra-index-url https://download.pytorch.org/whl/cpu
 torch==2.6.0+cpu
 torchvision==0.21.0+cpu
-ultralytics==8.1.0
