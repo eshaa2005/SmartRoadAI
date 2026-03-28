@@ -1,0 +1,9 @@
+# Generated/private output artifacts
+outputs/
+static/outputs/
+
+# Optional: local env files
+.env
+.venv/
+__pycache__/
+*.pyc
