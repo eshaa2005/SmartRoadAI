@@ -73,6 +73,23 @@
     margin-bottom: 20px; text-align: center;
   }
 
+  .auth-tabs {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 8px;
+    margin-bottom: 18px;
+  }
+  .auth-tab {
+    padding: 10px 12px; border-radius: 4px; border: 1px solid var(--border);
+    background: var(--surface); color: var(--muted); cursor: pointer;
+    font-family: var(--mono); font-size: 10px; font-weight: 700;
+    text-transform: uppercase; letter-spacing: 1.2px;
+  }
+  .auth-tab.active {
+    border-color: var(--accent); color: var(--accent);
+    background: rgba(240,192,64,0.08);
+  }
+
+  .hidden { display: none; }
+
   /* Inputs */
   .field { margin-bottom: 14px; }
   .field label {
@@ -142,7 +159,12 @@
   </div>
 
   <div class="card">
-    <div class="card-title">Sign In</div>
+    <div class="card-title" id="form-title">Sign In</div>
+
+    <div class="auth-tabs">
+      <button class="auth-tab active" id="tab-login" onclick="setMode('login')" type="button">Sign In</button>
+      <button class="auth-tab" id="tab-register" onclick="setMode('register')" type="button">Create Account</button>
+    </div>
 
     <div class="field">
       <label>Username</label>
@@ -154,25 +176,44 @@
       <input type="password" id="password" placeholder="Enter password" autocomplete="current-password">
     </div>
 
-    <button class="btn-login" id="btn-login" onclick="doLogin()">LOGIN</button>
+    <div class="field hidden" id="confirm-field">
+      <label>Confirm Password</label>
+      <input type="password" id="confirm-password" placeholder="Re-enter password" autocomplete="new-password">
+    </div>
+
+    <button class="btn-login" id="btn-login" onclick="submitAuth()">LOGIN</button>
     <div class="error-msg" id="error-msg"></div>
   </div>
 
-  <div class="hint">
+  <!-- <div class="hint">
     <div class="hint-title">Default Credentials</div>
     <div class="hint-row">Admin &nbsp;: <span>admin / admin123</span></div>
     <div class="hint-row">User 1 : <span>user1 / pass123</span></div>
     <div class="hint-row">User 2 : <span>user2 / pass456</span></div>
-  </div>
+    <div class="hint-row">New user : <span>use Create Account</span></div>
+  </div> -->
 </div>
 
 <script>
-  // Press Enter to login
-  document.addEventListener("keydown", e => { if (e.key === "Enter") doLogin(); });
+  let authMode = "login";
 
-  async function doLogin() {
+  // Press Enter to login
+  document.addEventListener("keydown", e => { if (e.key === "Enter") submitAuth(); });
+
+  function setMode(mode) {
+    authMode = mode;
+    document.getElementById("tab-login").classList.toggle("active", mode === "login");
+    document.getElementById("tab-register").classList.toggle("active", mode === "register");
+    document.getElementById("form-title").textContent = mode === "login" ? "Sign In" : "Create Account";
+    document.getElementById("btn-login").textContent = mode === "login" ? "LOGIN" : "REGISTER";
+    document.getElementById("confirm-field").classList.toggle("hidden", mode === "login");
+    document.getElementById("error-msg").textContent = "";
+  }
+
+  async function submitAuth() {
     const username = document.getElementById("username").value.trim();
     const password = document.getElementById("password").value.trim();
+    const confirm  = document.getElementById("confirm-password").value.trim();
     const btn      = document.getElementById("btn-login");
     const errEl    = document.getElementById("error-msg");
 
@@ -181,15 +222,25 @@
       return;
     }
 
+    if (authMode === "register" && !confirm) {
+      errEl.textContent = "Please confirm your password";
+      return;
+    }
+
     btn.disabled   = true;
-    btn.innerHTML  = '<span class="spinner"></span>Signing in...';
+    btn.innerHTML  = `<span class="spinner"></span>${authMode === "login" ? "Signing in..." : "Creating..."}`;
     errEl.textContent = "";
 
     try {
-      const res  = await fetch("/api/login", {
+      const endpoint = authMode === "login" ? "/api/login" : "/api/register";
+      const payload = authMode === "login"
+        ? { username, password }
+        : { username, password, confirm_password: confirm };
+
+      const res  = await fetch(endpoint, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ username, password })
+        body: JSON.stringify(payload)
       });
       const data = await res.json();
 
@@ -203,14 +254,16 @@
       } else {
         errEl.textContent = data.error || "Login failed";
         btn.disabled  = false;
-        btn.innerHTML = "LOGIN";
+        btn.innerHTML = authMode === "login" ? "LOGIN" : "REGISTER";
       }
     } catch(e) {
       errEl.textContent = "Server error. Is Flask running?";
       btn.disabled  = false;
-      btn.innerHTML = "LOGIN";
+      btn.innerHTML = authMode === "login" ? "LOGIN" : "REGISTER";
     }
   }
+
+  setMode("login");
 </script>
 </body>
 </html>

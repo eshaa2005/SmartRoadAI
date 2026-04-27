@@ -132,12 +132,16 @@
   .log-time{font-family:var(--mono);font-size:9px;color:var(--muted);margin-top:2px;}
   .log-user{font-family:var(--mono);font-size:9px;color:var(--accent);
     background:rgba(240,192,64,0.1);padding:2px 6px;border-radius:2px;display:inline-block;margin-top:2px;}
+  .log-status{font-family:var(--mono);font-size:9px;font-weight:700;display:inline-block;padding:2px 6px;border-radius:2px;margin-top:2px;letter-spacing:0.8px;text-transform:uppercase;}
+  .log-status.open{background:rgba(32,192,96,0.12);color:var(--sev-low);border:1px solid rgba(32,192,96,0.25);}
+  .log-status.resolved{background:rgba(106,116,128,0.12);color:#b0b7bf;border:1px solid rgba(106,116,128,0.25);}
+  .log-resolution{font-family:var(--mono);font-size:9px;color:var(--muted);margin-top:3px;line-height:1.5;}
   .log-count{font-family:var(--cond);font-size:18px;font-weight:800;color:var(--danger);}
-  .del-btn{font-family:var(--mono);font-size:9px;color:var(--muted);
+  .resolve-btn,.del-btn{font-family:var(--mono);font-size:9px;color:var(--muted);
     background:none;border:1px solid var(--border);border-radius:3px;
     padding:3px 8px;cursor:pointer;transition:all 0.15s;display:none;}
-  .del-btn:hover{color:var(--danger);border-color:var(--danger);}
-  .del-btn.visible{display:inline-block;}
+  .resolve-btn:hover{color:var(--safe);border-color:var(--safe);}
+  .resolve-btn.visible{display:inline-block;}
 
   /* Images */
   .images-section{margin-bottom:20px;}
@@ -225,7 +229,7 @@
       <div class="stat-card-val" style="color:var(--sev-crit)" id="d-critical">0</div>
       <div class="stat-card-sub">need urgent fix</div>
     </div>
-    <div class="stat-card">
+    <div class="stat-card" id="model-card">
       <div class="stat-card-label">Model</div>
       <div class="stat-card-val" style="font-size:12px;line-height:1.8" id="d-model">—</div>
       <div class="stat-card-sub">YOLO</div>
@@ -270,7 +274,11 @@
     <div class="log-card">
       <div class="card-header">
         <div class="card-title">Detection log</div>
-        <div class="card-badge" id="log-count">0 entries</div>
+        <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
+          <div class="card-badge" id="log-count">0 entries</div>
+          <div class="card-badge" style="background:rgba(32,192,96,0.1);color:var(--sev-low);border-color:rgba(32,192,96,0.3)" id="log-open-count">0 open</div>
+          <div class="card-badge" style="background:rgba(106,116,128,0.1);color:#b0b7bf;border-color:rgba(106,116,128,0.3)" id="log-resolved-count">0 resolved</div>
+        </div>
       </div>
       <div class="log-list" id="log-list">
         <div class="empty">No detections yet.</div>
@@ -344,6 +352,10 @@ function aggregateByEvent(data) {
         image: d.image,
         frame_count: 0,
         member_ids: [],
+        status: d.status || 'open',
+        resolved_at: d.resolved_at || '',
+        resolved_by: d.resolved_by || '',
+        resolution_note: d.resolution_note || '',
       });
     }
 
@@ -351,6 +363,12 @@ function aggregateByEvent(data) {
     g.frame_count += 1;
     g.boxes += Number(d.boxes || 0);
     g.member_ids.push(d.id);
+    if (d.status === 'resolved') {
+      g.status = 'resolved';
+      g.resolved_at = d.resolved_at || g.resolved_at;
+      g.resolved_by = d.resolved_by || g.resolved_by;
+      g.resolution_note = d.resolution_note || g.resolution_note;
+    }
 
     // Keep newest timestamp/id as representative row
     if ((d.timestamp || '') > (g.timestamp || '')) {
@@ -445,6 +463,12 @@ function renderStats(stats, clusters, critCount) {
   document.getElementById('d-hotspots').textContent = clusters.length;
   document.getElementById('d-critical').textContent = critCount;
   document.getElementById('d-model').textContent    = (stats.model||'').replace('.pt','');
+  const modelCard = document.getElementById('model-card');
+  if (stats.role === "admin") {
+    modelCard.style.display = 'none';
+  } else {
+    modelCard.style.display = '';
+  }
   if (stats.role !== "admin") document.getElementById('d-events-sub').textContent = "your events";
 }
 
@@ -554,10 +578,13 @@ function renderHotspots(clusters) {
 function renderLog(data) {
   const el = document.getElementById('log-list');
   document.getElementById('log-count').textContent = data.length + ' reports';
+  document.getElementById('log-open-count').textContent = data.filter(d => (d.status || 'open') !== 'resolved').length + ' open';
+  document.getElementById('log-resolved-count').textContent = data.filter(d => d.status === 'resolved').length + ' resolved';
   if (!data.length) { el.innerHTML = '<div class="empty">No reports yet.</div>'; return; }
 
   el.innerHTML = data.map(d => {
     const sev = getSeverity(d.boxes);
+    const isResolved = d.status === 'resolved';
     return `
       <div class="log-item" id="logrow-${d.id}">
         <div class="log-num">#${d.id}</div>
@@ -565,10 +592,12 @@ function renderLog(data) {
         <div style="cursor:pointer" onclick="focusOnMap(${d.lat||0},${d.lon||0})">
           <div class="log-loc">${d.city||'Unknown'}</div>
           <div class="log-time">${formatTime(d.timestamp)} · Ev.${d.event} · ${d.frame_count||1} image${(d.frame_count||1)>1?'s':''}</div>
+          <div class="log-status ${isResolved ? 'resolved' : 'open'}">${isResolved ? 'Resolved' : 'Open'}</div>
           ${currentRole==='admin'?`<div class="log-user">${d.username||''}</div>`:''}
+          ${isResolved && d.resolution_note ? `<div class="log-resolution">${d.resolved_by ? `By ${d.resolved_by} · ` : ''}${formatTime(d.resolved_at)}<br>${d.resolution_note}</div>` : ''}
         </div>
         <div class="log-count" style="color:${sev.color}">${d.boxes}</div>
-        <button class="del-btn ${currentRole==='admin'?'visible':''}" onclick="deleteEntry(${JSON.stringify(d.member_ids||[]).replace(/"/g, '&quot;')})">DEL</button>
+        <button class="resolve-btn ${currentRole==='admin' && !isResolved ? 'visible' : ''}" onclick="resolveEntry(${JSON.stringify(d.member_ids||[]).replace(/"/g, '&quot;')})">RESOLVE</button>
       </div>
     `;
   }).join('');
@@ -627,6 +656,20 @@ async function deleteEntry(ids) {
     }
   }
   if (ok) refresh(); else alert("Delete failed");
+}
+
+async function resolveEntry(ids) {
+  const idList = Array.isArray(ids) ? ids : [ids];
+  if (!idList.length) return;
+  const note = prompt("Add a short resolution note (optional):", "Issue inspected and resolved");
+  if (note === null) return;
+
+  const res = await fetch(`/api/resolve/${idList[0]}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ note })
+  });
+  if (res.ok) refresh(); else alert("Resolve failed");
 }
 
 function exportCSV() { window.location.href = "/api/export"; }

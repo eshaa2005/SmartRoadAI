@@ -7,3 +7,4 @@ static/outputs/
 .venv/
 __pycache__/
 *.pyc
+users.json

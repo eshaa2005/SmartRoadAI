@@ -13,15 +13,18 @@ import logging
 import socket
 from datetime import datetime
 from functools import wraps
+from werkzeug.security import generate_password_hash, check_password_hash
 
 app = Flask(__name__)
 app.secret_key = "smartroad_secret_2024"
 
 # ── Config ────────────────────────────────────────────────────────────────────
+BASE_DIR      = os.path.dirname(os.path.abspath(__file__))
 MODEL_PATH    = "yolo12s_RDD2022_best.pt"
 OUTPUT_DIR    = "outputs"
 STAGING_DIR   = "staging"
 LOG_FILE      = os.path.join(OUTPUT_DIR, "detections_log.json")
+USERS_FILE    = os.path.join(BASE_DIR, "users.json")
 MAX_PER_EVENT = 3
 CONF_THRESH   = 0.25
 os.makedirs(OUTPUT_DIR, exist_ok=True)
@@ -39,10 +42,103 @@ CLASS_LABELS = {
 # ── Credentials ───────────────────────────────────────────────────────────────
 ADMIN_USERNAME = "admin"
 ADMIN_PASSWORD = "admin123"
-USERS = {
+DEFAULT_USERS = {
     "user1": "pass123",
     "user2": "pass456",
 }
+
+
+def _default_user_store():
+    store = {
+        ADMIN_USERNAME: {
+            "password_hash": generate_password_hash(ADMIN_PASSWORD),
+            "role": "admin",
+            "created_at": datetime.now().isoformat(),
+        }
+    }
+    for username, password in DEFAULT_USERS.items():
+        store[username] = {
+            "password_hash": generate_password_hash(password),
+            "role": "user",
+            "created_at": datetime.now().isoformat(),
+        }
+    return store
+
+
+def save_users_to_disk(users):
+    tmp_file = USERS_FILE + ".tmp"
+    with open(tmp_file, "w", encoding="utf-8") as f:
+        json.dump(users, f, ensure_ascii=False, indent=2)
+    os.replace(tmp_file, USERS_FILE)
+
+
+def load_users_from_disk():
+    changed = False
+    users = {}
+
+    if os.path.exists(USERS_FILE):
+        try:
+            with open(USERS_FILE, "r", encoding="utf-8") as f:
+                raw = json.load(f)
+            if isinstance(raw, dict):
+                users = raw
+        except Exception:
+            users = {}
+
+    if not users:
+        users = _default_user_store()
+        save_users_to_disk(users)
+        return users
+
+    normalized = {}
+    for username, record in users.items():
+        if isinstance(record, str):
+            normalized[username] = {
+                "password_hash": generate_password_hash(record),
+                "role": "user",
+                "created_at": datetime.now().isoformat(),
+            }
+            changed = True
+            continue
+
+        if not isinstance(record, dict):
+            continue
+
+        password_hash = record.get("password_hash")
+        if not password_hash and record.get("password"):
+            password_hash = generate_password_hash(str(record.get("password", "")))
+            changed = True
+
+        role = record.get("role") or ("admin" if username == ADMIN_USERNAME else "user")
+        created_at = record.get("created_at") or datetime.now().isoformat()
+
+        normalized[username] = {
+            "password_hash": password_hash or "",
+            "role": role,
+            "created_at": created_at,
+        }
+
+    if ADMIN_USERNAME not in normalized or not check_password_hash(normalized[ADMIN_USERNAME].get("password_hash", ""), ADMIN_PASSWORD):
+        normalized[ADMIN_USERNAME] = {
+            "password_hash": generate_password_hash(ADMIN_PASSWORD),
+            "role": "admin",
+            "created_at": datetime.now().isoformat(),
+        }
+        changed = True
+
+    for username, password in DEFAULT_USERS.items():
+        if username not in normalized:
+            normalized[username] = {
+                "password_hash": generate_password_hash(password),
+                "role": "user",
+                "created_at": datetime.now().isoformat(),
+            }
+            changed = True
+
+    if changed:
+        save_users_to_disk(normalized)
+
+    return normalized
 
 # ── Geocode ───────────────────────────────────────────────────────────────────
 def geocode_location(lat, lon):
@@ -116,7 +212,16 @@ def load_log_from_disk():
         if not isinstance(data, list):
             print("Warning: log file format invalid; expected list")
             return
-        detections_log = [d for d in data if isinstance(d, dict)]
+        detections_log = []
+        for d in data:
+            if not isinstance(d, dict):
+                continue
+            row = dict(d)
+            row.setdefault("status", "open")
+            row.setdefault("resolved_at", "")
+            row.setdefault("resolved_by", "")
+            row.setdefault("resolution_note", "")
+            detections_log.append(row)
         max_event = 0
         for d in detections_log:
             try:
@@ -190,15 +295,51 @@ def do_login():
     data     = request.json or {}
     username = data.get("username", "").strip()
     password = data.get("password", "").strip()
-    if username == ADMIN_USERNAME and password == ADMIN_PASSWORD:
+    users = load_users_from_disk()
+
+    record = users.get(username)
+    if record and check_password_hash(record.get("password_hash", ""), password):
         session["username"] = username
-        session["role"]     = "admin"
-        return jsonify({"role": "admin"})
-    if username in USERS and USERS[username] == password:
-        session["username"] = username
-        session["role"]     = "user"
-        return jsonify({"role": "user"})
+        session["role"]     = record.get("role", "user")
+        return jsonify({"role": session["role"]})
     return jsonify({"error": "Invalid username or password"}), 401
+
+
+@app.route("/api/register", methods=["POST"])
+def do_register():
+    data     = request.json or {}
+    username = data.get("username", "").strip()
+    password = data.get("password", "").strip()
+    confirm  = data.get("confirm_password", "").strip()
+
+    if not username or not password or not confirm:
+        return jsonify({"error": "Please fill in all fields"}), 400
+    if username == ADMIN_USERNAME:
+        return jsonify({"error": "That username is reserved"}), 400
+    if len(username) < 3 or len(username) > 30:
+        return jsonify({"error": "Username must be 3 to 30 characters"}), 400
+    if not all(ch.isalnum() or ch in "._-" for ch in username):
+        return jsonify({"error": "Username can only use letters, numbers, dot, underscore, and dash"}), 400
+    if len(password) < 8:
+        return jsonify({"error": "Password must be at least 8 characters"}), 400
+    if password != confirm:
+        return jsonify({"error": "Passwords do not match"}), 400
+
+    with lock:
+        users = load_users_from_disk()
+        if username in users:
+            return jsonify({"error": "Username already exists"}), 409
+
+        users[username] = {
+            "password_hash": generate_password_hash(password),
+            "role": "user",
+            "created_at": datetime.now().isoformat(),
+        }
+        save_users_to_disk(users)
+
+    session["username"] = username
+    session["role"] = "user"
+    return jsonify({"role": "user", "username": username})
 
 @app.route("/api/logout", methods=["POST"])
 def logout():
@@ -394,6 +535,10 @@ def submit_event():
                 "damage_summary": f.get("damage_summary", ""),
                 "damage_types":   damage_labels,
                 "class_counts":   f.get("class_counts", {}),
+                "status":         "open",
+                "resolved_at":    "",
+                "resolved_by":    "",
+                "resolution_note": "",
             })
             next_id += 1
 
@@ -433,6 +578,8 @@ def get_log():
         user = session.get("username")
         data = list(reversed(detections_log)) if role == "admin" \
                else list(reversed([d for d in detections_log if d["username"] == user]))
+
+        data.sort(key=lambda d: (d.get("status") == "resolved", d.get("timestamp", "")), reverse=False)
     return jsonify(data)
 
 @app.route("/api/stats")
@@ -444,13 +591,45 @@ def get_stats():
         data = detections_log if role == "admin" \
                else [d for d in detections_log if d["username"] == user]
         events = len(set(d["event"] for d in data))
+        resolved = len([d for d in data if d.get("status") == "resolved"])
+        open_issues = len(data) - resolved
     return jsonify({
         "total_events":     events,
         "total_detections": len(data),
+        "open_issues":      open_issues,
+        "resolved_issues":  resolved,
         "model":            MODEL_PATH,
         "role":             role,
         "username":         user,
     })
+
+@app.route("/api/resolve/<int:detection_id>", methods=["POST"])
+@login_required
+@admin_required
+def resolve_detection(detection_id):
+    payload = request.json or {}
+    note = (payload.get("note") or "").strip()
+    now = datetime.now().isoformat()
+    resolved = 0
+
+    with lock:
+        target = next((d for d in detections_log if d["id"] == detection_id), None)
+        if not target:
+            return jsonify({"error": "Not found"}), 404
+
+        event_id = target.get("event")
+        for row in detections_log:
+            if row.get("event") == event_id:
+                row["status"] = "resolved"
+                row["resolved_at"] = now
+                row["resolved_by"] = session.get("username", "admin")
+                if note:
+                    row["resolution_note"] = note
+                resolved += 1
+
+        save_log_to_disk()
+
+    return jsonify({"ok": True, "event": event_id, "resolved": resolved})
 
 @app.route("/api/delete/<int:detection_id>", methods=["DELETE"])
 @login_required
@@ -475,7 +654,8 @@ def export_csv():
         data = list(detections_log)
     output = io.StringIO()
     fields = ["id","event","frame","timestamp","username","city","lat","lon",
-              "boxes","damage_summary","damage_types","note","image"]
+              "boxes","damage_summary","damage_types","note","image","status",
+              "resolved_at","resolved_by","resolution_note"]
     writer = csv.DictWriter(output, fieldnames=fields)
     writer.writeheader()
     for row in data:
@@ -504,13 +684,14 @@ if __name__ == "__main__":
 
     with lock:
         load_log_from_disk()
+        load_users_from_disk()
 
     port   = int(os.environ.get("PORT", 5000))
     lan_ip = get_lan_ip()
     print("\n" + "="*50)
     print("  SmartRoad AI — Server starting")
     print(f"  Admin : {ADMIN_USERNAME} / {ADMIN_PASSWORD}")
-    print(f"  Users : user1/pass123  user2/pass456")
+    print("  Users : default users are available, and new users can register")
     print(f"  Local : http://127.0.0.1:{port}")
     print(f"  LAN   : http://{lan_ip}:{port}")
     print("="*50 + "\n")
