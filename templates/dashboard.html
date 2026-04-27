@@ -456,12 +456,16 @@ function renderMap(clusters) {
   document.getElementById('map-count').textContent = clusters.length + ' clusters';
   document.getElementById('map-crit').textContent  = clusters.filter(c=>getSeverity(c.reports.length).level==='crit').length + ' critical';
 
+  const bounds = [];
+
   clusters.forEach(c => {
     const sev   = getSeverity(c.reports.length);
     const count = c.reports.length;
+    const latLng = [c.centLat, c.centLon];
+    bounds.push(latLng);
 
     // Outer pulse ring
-    const ring = L.circleMarker([c.centLat, c.centLon], {
+    const ring = L.circleMarker(latLng, {
       radius:      sev.size * 0.9,
       fillColor:   sev.ring,
       fillOpacity: 1,
@@ -487,7 +491,7 @@ function renderMap(clusters) {
     });
 
     const userList = currentRole === 'admin' ? `<br>By: ${c.users.join(', ')}` : '';
-    const marker = L.marker([c.centLat, c.centLon], { icon })
+    const marker = L.marker(latLng, { icon })
       .bindPopup(`
         <div style="font-weight:700;color:${sev.color};font-size:13px;margin-bottom:4px">
           ${sev.label} SEVERITY
@@ -502,9 +506,10 @@ function renderMap(clusters) {
     mapLayers.push(ring, marker);
   });
 
-  if (clusters.length > 0) {
-    const top = clusters[0];
-    map.setView([top.centLat, top.centLon], 14);
+  if (bounds.length > 1) {
+    map.fitBounds(bounds, { padding: [40, 40], maxZoom: 12 });
+  } else if (bounds.length === 1) {
+    map.setView(bounds[0], 11);
   }
 }
 
